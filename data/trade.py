@@ -1,38 +1,31 @@
 """Builds a live trade evaluation, combining Sleeper rosters with real
-rest-of-season values (core/waiver.py's ros_value, via the same feature
-extraction data/waiver.py uses) and core/trade.py.
+rest-of-season values (data/ros_value.py's player_ros_value, shared with
+data/waiver.py) and core/trade.py.
 """
 
 from __future__ import annotations
 
-import data.stats as stats
 from core.trade import TradeEvaluation, evaluate_side, evaluate_trade
-from core.waiver import ros_value
+from core.waiver import RosValueBreakdown
 from data.models import League, Player, Roster
 from data.projections import SKILL_POSITIONS
+from data.ros_value import RosContext, load_ros_context, player_ros_value
 
 
-def _roster_positions_and_values(
+def _roster_positions_and_breakdowns(
     roster: Roster,
     players: dict[str, Player],
-    weekly_points,
-    opportunity,
-    sleeper_to_gsis: dict[str, str | None],
-    week: int,
-    remaining_weeks: int,
-) -> tuple[dict[str, str], dict[str, float]]:
+    ctx: RosContext,
+) -> tuple[dict[str, str], dict[str, RosValueBreakdown]]:
     positions: dict[str, str] = {}
-    values: dict[str, float] = {}
+    breakdowns: dict[str, RosValueBreakdown] = {}
     for player_id in roster.players:
         player = players.get(player_id)
         if player is None or player.position not in SKILL_POSITIONS:
             continue
-        weekly_points_list, recent_share, season_share = stats.player_weekly_points_and_shares(
-            player_id, weekly_points, opportunity, sleeper_to_gsis, week
-        )
         positions[player_id] = player.position
-        values[player_id] = ros_value(weekly_points_list, recent_share, season_share, remaining_weeks)
-    return positions, values
+        breakdowns[player_id] = player_ros_value(ctx, player, player_id)
+    return positions, breakdowns
 
 
 def build_trade_evaluation(
@@ -45,22 +38,15 @@ def build_trade_evaluation(
     season: str,
     week: int,
     demo: bool = False,
-) -> TradeEvaluation:
-    remaining_weeks = max(int(league.settings.get("playoff_week_start") or week + 1) - week, 1)
+) -> tuple[TradeEvaluation, dict[str, RosValueBreakdown]]:
+    ctx = load_ros_context(league, season, week, demo=demo)
 
-    weekly_stats = stats.load_weekly_stats(season, demo=demo)
-    weekly_points = stats.weekly_fantasy_points(weekly_stats, league.scoring_settings)
-    snap_counts = stats.load_snap_counts(season, demo=demo)
-    id_map = stats.load_player_id_map(demo=demo)
-    opportunity = stats.opportunity_shares(weekly_stats, snap_counts, id_map)
-    sleeper_to_gsis = dict(zip(id_map["sleeper_id"].to_list(), id_map["gsis_id"].to_list()))
-
-    my_positions, my_values = _roster_positions_and_values(
-        my_roster, players, weekly_points, opportunity, sleeper_to_gsis, week, remaining_weeks
+    my_positions, my_breakdowns = _roster_positions_and_breakdowns(my_roster, players, ctx)
+    their_positions, their_breakdowns = _roster_positions_and_breakdowns(
+        their_roster, players, ctx
     )
-    their_positions, their_values = _roster_positions_and_values(
-        their_roster, players, weekly_points, opportunity, sleeper_to_gsis, week, remaining_weeks
-    )
+    my_values = {pid: b.total for pid, b in my_breakdowns.items()}
+    their_values = {pid: b.total for pid, b in their_breakdowns.items()}
 
     my_result = evaluate_side(
         league.roster_positions,
@@ -81,4 +67,9 @@ def build_trade_evaluation(
         received_ros_values={pid: my_values[pid] for pid in gives},
     )
 
-    return evaluate_trade(my_result, their_result)
+    evaluation = evaluate_trade(my_result, their_result)
+    breakdowns = {
+        **{pid: my_breakdowns[pid] for pid in gives},
+        **{pid: their_breakdowns[pid] for pid in receives},
+    }
+    return evaluation, breakdowns

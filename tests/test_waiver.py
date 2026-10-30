@@ -1,6 +1,7 @@
 from core.waiver import (
     bid_percent_range,
     need_score,
+    position_age_multiplier,
     ros_value,
     suggest_drop,
     trending_bonus,
@@ -9,39 +10,134 @@ from core.waiver import (
 
 def test_ros_value_no_opportunity_trend():
     # baseline([10,20,30,40]) = 0.5*mean([20,30,40]) + 0.5*mean(all) = 0.5*30+0.5*25 = 27.5
-    assert ros_value([10, 20, 30, 40], recent_share=0.25, season_share=0.25, remaining_weeks=5) == 137.5
+    result = ros_value(
+        [10, 20, 30, 40], recent_share=0.25, season_share=0.25, week_weights=[1.0] * 5
+    )
+    assert result.total == 137.5
 
 
 def test_ros_value_with_rising_opportunity():
     # baseline([10,10,10]) = 10; ratio 0.3/0.2=1.5 clamped to 1.3 -> opp_adj = 10*0.3 = 3
-    # per_game_raw = 13, shrunk by 3/4 games of history -> 9.75, remaining_weeks=4
-    assert ros_value([10, 10, 10], recent_share=0.3, season_share=0.2, remaining_weeks=4) == 39.0
+    # per_game_raw = 13, shrunk by 3/4 games of history -> 9.75, 4 weeks
+    result = ros_value([10, 10, 10], recent_share=0.3, season_share=0.2, week_weights=[1.0] * 4)
+    assert result.total == 39.0
 
 
 def test_ros_value_zero_remaining_weeks():
-    assert ros_value([10, 10, 10], recent_share=0.3, season_share=0.2, remaining_weeks=0) == 0.0
+    result = ros_value([10, 10, 10], recent_share=0.3, season_share=0.2, week_weights=[])
+    assert result.total == 0.0
 
 
 def test_ros_value_no_history():
-    assert ros_value([], recent_share=0.2, season_share=0.2, remaining_weeks=5) == 0.0
+    result = ros_value([], recent_share=0.2, season_share=0.2, week_weights=[1.0] * 5)
+    assert result.total == 0.0
 
 
 def test_ros_value_shrinks_a_single_fluke_game():
     # one 20-point game is NOT the same as a proven 20-point-per-game player:
     # shrunk by 1/4 games of history -> per_game = 20*0.25 = 5.0
-    value = ros_value([20.0], recent_share=0.3, season_share=0.3, remaining_weeks=7)
-    assert value == 35.0
+    result = ros_value([20.0], recent_share=0.3, season_share=0.3, week_weights=[1.0] * 7)
+    assert result.total == 35.0
     naive_unshrunk = 20.0 * 7  # what it would be with no sample-size regularization
-    assert value < naive_unshrunk
+    assert result.total < naive_unshrunk
 
 
 def test_ros_value_no_shrinkage_once_past_the_threshold():
     # 4 games (at the shrinkage_full_weeks default) and 8 games should give
     # the same per-game trust -- shrinkage caps at 1.0, it isn't an ongoing
     # bonus for a longer track record.
-    four_games = ros_value([10.0] * 4, recent_share=0.3, season_share=0.3, remaining_weeks=5)
-    eight_games = ros_value([10.0] * 8, recent_share=0.3, season_share=0.3, remaining_weeks=5)
-    assert four_games == eight_games == 50.0
+    four_games = ros_value([10.0] * 4, recent_share=0.3, season_share=0.3, week_weights=[1.0] * 5)
+    eight_games = ros_value([10.0] * 8, recent_share=0.3, season_share=0.3, week_weights=[1.0] * 5)
+    assert four_games.total == eight_games.total == 50.0
+
+
+def test_ros_value_bye_week_zeroes_that_weeks_contribution():
+    no_bye = ros_value([10.0] * 4, recent_share=0.3, season_share=0.3, week_weights=[1.0] * 5)
+    with_bye = ros_value(
+        [10.0] * 4, recent_share=0.3, season_share=0.3, week_weights=[1.0, 0.0, 1.0, 1.0, 1.0]
+    )
+    assert with_bye.games_weight == no_bye.games_weight - 1
+    assert with_bye.total < no_bye.total
+
+
+def test_ros_value_playoff_week_weight_increases_total():
+    regular = ros_value([10.0] * 4, recent_share=0.3, season_share=0.3, week_weights=[1.0] * 5)
+    with_playoff_week = ros_value(
+        [10.0] * 4, recent_share=0.3, season_share=0.3, week_weights=[1.0, 1.0, 1.0, 1.0, 1.5]
+    )
+    assert with_playoff_week.total > regular.total
+
+
+def test_ros_value_availability_multiplier_affects_only_first_week():
+    full_health = ros_value([10.0] * 4, recent_share=0.3, season_share=0.3, week_weights=[1.0] * 3)
+    out_this_week = ros_value(
+        [10.0] * 4,
+        recent_share=0.3,
+        season_share=0.3,
+        week_weights=[1.0] * 3,
+        availability_multiplier=0.0,
+    )
+    # only week_weights[0]'s contribution (1 game) is zeroed, not all 3
+    assert out_this_week.games_weight == full_health.games_weight - 1
+
+
+def test_ros_value_regression_shifts_per_game():
+    baseline_only = ros_value([10.0] * 4, recent_share=0.3, season_share=0.3, week_weights=[1.0])
+    with_regression = ros_value(
+        [10.0] * 4,
+        recent_share=0.3,
+        season_share=0.3,
+        week_weights=[1.0],
+        regression_points_per_game=-2.0,
+    )
+    assert with_regression.per_game == baseline_only.per_game - 2.0
+
+
+def test_ros_value_age_multiplier_scales_per_game():
+    full = ros_value([10.0] * 4, recent_share=0.3, season_share=0.3, week_weights=[1.0])
+    aged = ros_value(
+        [10.0] * 4, recent_share=0.3, season_share=0.3, week_weights=[1.0], age_multiplier=0.8
+    )
+    assert aged.per_game == full.per_game * 0.8
+
+
+def test_ros_value_per_game_floors_at_zero():
+    result = ros_value(
+        [1.0] * 4,
+        recent_share=0.3,
+        season_share=0.3,
+        week_weights=[1.0],
+        regression_points_per_game=-100.0,
+    )
+    assert result.per_game == 0.0
+    assert result.total == 0.0
+
+
+def test_position_age_multiplier_rb_at_or_below_peak():
+    assert position_age_multiplier("RB", 25) == 1.0
+    assert position_age_multiplier("RB", 27) == 1.0
+
+
+def test_position_age_multiplier_rb_past_peak():
+    assert round(position_age_multiplier("RB", 30), 2) == 0.76
+
+
+def test_position_age_multiplier_floors():
+    assert position_age_multiplier("RB", 60) == 0.60
+
+
+def test_position_age_multiplier_wr_te_qb_spot_checks():
+    assert position_age_multiplier("WR", 29) == 1.0
+    assert position_age_multiplier("WR", 34) < 1.0
+    assert position_age_multiplier("TE", 32) == 1.0
+    assert round(position_age_multiplier("TE", 34), 2) == 0.89
+    assert position_age_multiplier("QB", 34) == 1.0
+    assert position_age_multiplier("QB", 38) < 1.0
+
+
+def test_position_age_multiplier_unknown_position_or_age():
+    assert position_age_multiplier("K", 30) == 1.0
+    assert position_age_multiplier("RB", None) == 1.0
 
 
 def test_need_score_deficit_only():

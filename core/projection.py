@@ -15,6 +15,18 @@ Z_80 = 0.8416212335729143
 
 OUT_STATUSES = {"out", "ir", "injured reserve", "pup", "nfi", "suspended"}
 
+# How much of a player's actual-vs-expected-fantasy-points gap (a ratio, e.g.
+# +0.2 means they scored 20% more than nflverse's own expected-points model
+# projected) to pull back toward 0 per game. 0.5 mirrors
+# opportunity_adjustment's own philosophy of partial, not full, trust in a
+# trend: beating expectation may reflect a genuinely expanded role, not just
+# TD luck, so regress halfway, not all the way.
+REGRESSION_PULL_FRACTION = 0.5
+
+# Clamp on the same ratio, same spirit as opportunity_adjustment's 0.7/1.3
+# clamp: caps how much a small early-season sample can swing the projection.
+REGRESSION_MAX_RATIO = 0.5
+
 
 @dataclass
 class Projection:
@@ -72,6 +84,30 @@ def matchup_adjustment(
         opponent_points_allowed - league_avg_points_allowed
     )
     return effective_allowed - league_avg_points_allowed
+
+
+def regression_adjustment(
+    diff_ratio: float,
+    baseline: float,
+    weeks_played: int,
+    shrinkage_full_weeks: int = 8,
+    pull_fraction: float = REGRESSION_PULL_FRACTION,
+    max_ratio: float = REGRESSION_MAX_RATIO,
+) -> float:
+    """Point delta pulling `baseline` toward nflverse's own expected-
+    fantasy-points model when actual production has diverged from it
+    (TD-rate/efficiency mean reversion), shrunk toward 0 early in the
+    season when the sample is small.
+
+    `diff_ratio` is (actual - expected) / expected over the player's prior
+    games -- a ratio, not a raw point diff, since nflverse's expected-points
+    model uses its own internal scoring assumptions, not this league's real
+    scoring_settings. Applying the ratio to the already-correctly-scored
+    `baseline` sidesteps ever reconciling the two scoring systems.
+    """
+    ratio = min(max(diff_ratio, -max_ratio), max_ratio)
+    shrinkage = min(weeks_played / shrinkage_full_weeks, 1.0) if shrinkage_full_weeks > 0 else 1.0
+    return -pull_fraction * ratio * baseline * shrinkage
 
 
 def availability_multiplier(

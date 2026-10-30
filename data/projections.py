@@ -11,6 +11,7 @@ from statistics import mean
 import data.stats as stats
 from core.projection import Projection, project_player
 from data.models import League, Player, Roster
+from data.stats import opponent_this_week
 
 SKILL_POSITIONS = {"QB", "RB", "WR", "TE"}
 
@@ -91,14 +92,3 @@ def _gsis_id(id_map, sleeper_id: str) -> str | None:
     if row.height == 0:
         return None
     return row["gsis_id"][0]
-
-
-def opponent_this_week(schedules, team: str, week: int) -> str | None:
-    games = schedules.filter(
-        (schedules["week"] == week)
-        & ((schedules["home_team"] == team) | (schedules["away_team"] == team))
-    )
-    if games.height == 0:
-        return None
-    row = games.row(0, named=True)
-    return row["away_team"] if row["home_team"] == team else row["home_team"]

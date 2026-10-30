@@ -5,19 +5,17 @@ transparent scoring. Skill positions only (QB/RB/WR/TE).
 
 from __future__ import annotations
 
-from statistics import mean
-
 import data.stats as stats
 from core.waiver import (
     NeedBreakdown,
     WaiverTarget,
     bid_percent_range,
     need_score,
-    ros_value,
     suggest_drop,
     trending_bonus,
 )
 from data.models import League, Player, Roster
+from data.ros_value import load_ros_context, player_ros_value
 from data.sleeper import SleeperClient
 
 SKILL_POSITIONS = {"QB", "RB", "WR", "TE"}
@@ -41,32 +39,6 @@ def free_agents(
         and p.position in SKILL_POSITIONS
         and sleeper_to_gsis.get(pid) in played_gsis_ids
     ]
-
-
-def _player_ros_value(
-    sleeper_id: str,
-    weekly_points,
-    opportunity,
-    sleeper_to_gsis: dict[str, str | None],
-    week: int,
-    remaining_weeks: int,
-) -> float:
-    gsis_id = sleeper_to_gsis.get(sleeper_id)
-    prior_rows = weekly_points.filter(
-        (weekly_points["player_id"] == gsis_id) & (weekly_points["week"] < week)
-    ).sort("week")
-    weekly_points_list = prior_rows["fantasy_points"].to_list()
-
-    opp_rows = opportunity.filter(
-        (opportunity["sleeper_id"] == sleeper_id) & (opportunity["week"] < week)
-    ).sort("week")
-    share_by_week = dict(zip(opp_rows["week"].to_list(), opp_rows["opportunity_share"].to_list()))
-    prior_weeks = sorted(share_by_week)
-    recent_weeks = prior_weeks[-3:]
-    recent_share = mean(share_by_week[w] for w in recent_weeks) if recent_weeks else 0.0
-    season_share = mean(share_by_week[w] for w in prior_weeks) if prior_weeks else 0.0
-
-    return ros_value(weekly_points_list, recent_share, season_share, remaining_weeks)
 
 
 def _upcoming_byes(schedules, team: str, week: int, window: int) -> int:
@@ -115,36 +87,26 @@ def build_waiver_board(
 ) -> tuple[list[WaiverTarget], int]:
     """Returns (waiver targets sorted by score descending, total relevant
     free-agent pool size)."""
-    remaining_weeks = max(int(league.settings.get("playoff_week_start") or week + 1) - week, 1)
     is_faab = float(league.settings.get("waiver_budget") or 0) > 0
 
-    weekly_stats = stats.load_weekly_stats(season, demo=demo)
-    weekly_points = stats.weekly_fantasy_points(weekly_stats, league.scoring_settings)
-    snap_counts = stats.load_snap_counts(season, demo=demo)
-    id_map = stats.load_player_id_map(demo=demo)
-    opportunity = stats.opportunity_shares(weekly_stats, snap_counts, id_map)
-    schedules = stats.load_schedules(season, demo=demo)
-
-    sleeper_to_gsis = dict(zip(id_map["sleeper_id"].to_list(), id_map["gsis_id"].to_list()))
-    played_gsis_ids = set(weekly_points["player_id"].unique().to_list())
+    ctx = load_ros_context(league, season, week, demo=demo)
+    schedules = ctx.schedules
+    played_gsis_ids = set(ctx.weekly_points["player_id"].unique().to_list())
 
     rostered_ids = {pid for r in rosters for pid in r.players}
-    candidate_ids = free_agents(players, rostered_ids, played_gsis_ids, sleeper_to_gsis)
+    candidate_ids = free_agents(players, rostered_ids, played_gsis_ids, ctx.sleeper_to_gsis)
 
     trending = client.get_trending(type="add", lookback_hours=24, limit=100)
     trending_rank = {t.player_id: i + 1 for i, t in enumerate(trending)}
 
     def roster_ros_values(roster: Roster) -> dict[str, float]:
         return {
-            pid: _player_ros_value(pid, weekly_points, opportunity, sleeper_to_gsis, week, remaining_weeks)
+            pid: player_ros_value(ctx, players[pid], pid).total
             for pid in roster.players
             if players.get(pid) is not None and players[pid].position in SKILL_POSITIONS
         }
 
-    free_agent_ros = {
-        pid: _player_ros_value(pid, weekly_points, opportunity, sleeper_to_gsis, week, remaining_weeks)
-        for pid in candidate_ids
-    }
+    free_agent_ros = {pid: player_ros_value(ctx, players[pid], pid).total for pid in candidate_ids}
     my_roster_ros = roster_ros_values(my_roster)
     my_need = _roster_need_by_position(
         my_roster, players, my_roster_ros, league.roster_positions, schedules, week

@@ -66,6 +66,8 @@ def main() -> None:
     id_map = stats.load_player_id_map()
     snap_counts = stats.load_snap_counts(SEASON)
     schedules = stats.load_schedules(SEASON)
+    expected_points = stats.load_expected_points(SEASON)
+    player_ages = stats.load_player_ages()
 
     sleeper_to_gsis = dict(zip(id_map["sleeper_id"].to_list(), id_map["gsis_id"].to_list()))
     played_gsis_ids = set(weekly_stats["player_id"].unique().to_list())
@@ -132,6 +134,12 @@ def main() -> None:
     )
     # Schedules are league/team-wide, not per-player -- keep the full season.
     schedules.write_parquet(STATS_DIR / "schedules.parquet")
+    expected_points.filter(expected_points["player_id"].is_in(list(demo_gsis_ids))).write_parquet(
+        STATS_DIR / "expected_points.parquet"
+    )
+    player_ages.filter(player_ages["sleeper_id"].is_in(list(demo_player_ids))).write_parquet(
+        STATS_DIR / "player_ages.parquet"
+    )
     print(f"wrote {STATS_DIR.relative_to(REPO_ROOT)}/*.parquet")
 
 

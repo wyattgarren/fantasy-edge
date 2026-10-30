@@ -103,6 +103,126 @@ def is_bye_week(schedules: pl.DataFrame, team: str, week: int) -> bool:
     return played.height == 0
 
 
+def opponent_this_week(schedules: pl.DataFrame, team: str, week: int) -> str | None:
+    games = schedules.filter(
+        (schedules["week"] == week)
+        & ((schedules["home_team"] == team) | (schedules["away_team"] == team))
+    )
+    if games.height == 0:
+        return None
+    row = games.row(0, named=True)
+    return row["away_team"] if row["home_team"] == team else row["home_team"]
+
+
+def load_expected_points(season: str, demo: bool = False) -> pl.DataFrame:
+    """nflverse's own expected-fantasy-points model (actual vs. expected per
+    player/week) -- the TD-rate/efficiency regression signal. No
+    season_type/game_type column exists on this table (confirmed against
+    the live nflreadpy payload); callers filter `week < current_week`
+    themselves for no-leakage, same as every other per-week lookup here."""
+    if demo:
+        return pl.read_parquet(DEMO_DATA_DIR / "expected_points.parquet")
+    return nfl.load_ff_opportunity(seasons=[int(season)])
+
+
+def load_player_ages(demo: bool = False) -> pl.DataFrame:
+    """sleeper_id -> age, position, from nflreadpy's player-id crosswalk.
+    `age` is nflverse's own precomputed decimal age as of their data pull --
+    used directly rather than re-derived from birthdate."""
+    if demo:
+        return pl.read_parquet(DEMO_DATA_DIR / "player_ages.parquet")
+    ids = nfl.load_ff_playerids()
+    return (
+        ids.select(["sleeper_id", "age", "position"])
+        .filter(pl.col("sleeper_id").is_not_null() & pl.col("age").is_not_null())
+        .with_columns(pl.col("sleeper_id").cast(pl.Utf8))
+    )
+
+
+def expected_points_diff_ratio(
+    expected_points: pl.DataFrame, gsis_id: str | None, before_week: int
+) -> float | None:
+    """Mean (actual - expected) / mean(expected) fantasy points over this
+    player's games strictly before `before_week`. None if there's no prior
+    data or expected points sum to 0 (can't compute a meaningful ratio)."""
+    if gsis_id is None:
+        return None
+    rows = expected_points.filter(
+        (pl.col("player_id") == gsis_id) & (pl.col("week") < before_week)
+    )
+    if rows.height == 0:
+        return None
+    actual_total = float(rows["total_fantasy_points"].sum())
+    expected_total = float(rows["total_fantasy_points_exp"].sum())
+    if expected_total == 0:
+        return None
+    return (actual_total - expected_total) / expected_total
+
+
+def remaining_week_weights(
+    schedules: pl.DataFrame,
+    team: str,
+    from_week: int,
+    to_week: int,
+    playoff_week_start: int,
+    playoff_week_weight: float | None = None,
+) -> list[float]:
+    """One weight per week in [from_week, to_week]: 0.0 on team's bye,
+    `playoff_week_weight` on a playoff week, else 1.0."""
+    if playoff_week_weight is None:
+        from core.waiver import PLAYOFF_WEEK_WEIGHT
+
+        playoff_week_weight = PLAYOFF_WEEK_WEIGHT
+    weights = []
+    for week in range(from_week, to_week + 1):
+        if is_bye_week(schedules, team, week):
+            weights.append(0.0)
+        elif week >= playoff_week_start:
+            weights.append(playoff_week_weight)
+        else:
+            weights.append(1.0)
+    return weights
+
+
+def remaining_weeks_and_matchup_adjustment(
+    schedules: pl.DataFrame,
+    points_allowed: pl.DataFrame,
+    team: str,
+    position: str,
+    weeks_played: int,
+    from_week: int,
+    to_week: int,
+    before_week: int,
+) -> tuple[list[int], float]:
+    """The player's remaining week numbers in [from_week, to_week] with bye
+    weeks excluded, plus the average core.projection.matchup_adjustment(...)
+    across those weeks' real scheduled opponents. Every future week's
+    opponent-defense quality is looked up using the SAME `before_week`
+    (today's first-unplayed week) -- no future week can see data more
+    recent than what's known today without leaking."""
+    from core.projection import matchup_adjustment
+
+    league_avg = league_avg_points_allowed_through_week(points_allowed, position, before_week)
+    weeks: list[int] = []
+    adjustments: list[float] = []
+    for week in range(from_week, to_week + 1):
+        if is_bye_week(schedules, team, week):
+            continue
+        weeks.append(week)
+        opponent = opponent_this_week(schedules, team, week)
+        opp_allowed = (
+            points_allowed_through_week(points_allowed, opponent, position, before_week)
+            if opponent
+            else None
+        )
+        if opp_allowed is None or league_avg is None:
+            adjustments.append(0.0)
+        else:
+            adjustments.append(matchup_adjustment(opp_allowed, league_avg, weeks_played))
+    avg_adjustment = mean(adjustments) if adjustments else 0.0
+    return weeks, avg_adjustment
+
+
 def weekly_fantasy_points(
     weekly_stats: pl.DataFrame, scoring_settings: dict[str, float]
 ) -> pl.DataFrame:

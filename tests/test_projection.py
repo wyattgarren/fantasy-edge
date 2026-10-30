@@ -4,6 +4,7 @@ from core.projection import (
     matchup_adjustment,
     opportunity_adjustment,
     project_player,
+    regression_adjustment,
 )
 
 
@@ -45,6 +46,26 @@ def test_matchup_adjustment_partial_shrinkage():
 
 def test_matchup_adjustment_no_games_played_shrinks_to_zero():
     assert matchup_adjustment(25, 20, weeks_played=0, shrinkage_full_weeks=8) == 0.0
+
+
+def test_regression_adjustment_known_value():
+    # ratio=0.4 (no clamp needed), full shrinkage -> -0.5*0.4*20*1.0
+    assert regression_adjustment(0.4, baseline=20, weeks_played=8) == -4.0
+
+
+def test_regression_adjustment_clamps_extreme_ratio():
+    # ratio clamped from 0.8 to max_ratio 0.5 -> -0.5*0.5*20*1.0
+    assert regression_adjustment(0.8, baseline=20, weeks_played=8) == -5.0
+
+
+def test_regression_adjustment_partial_shrinkage():
+    # shrinkage = 4/8 = 0.5 -> -0.5*0.4*20*0.5
+    assert regression_adjustment(0.4, baseline=20, weeks_played=4) == -2.0
+
+
+def test_regression_adjustment_negative_ratio_is_a_positive_boost():
+    # underperforming their own expectation (bad luck) -> adjustment helps them
+    assert regression_adjustment(-0.4, baseline=20, weeks_played=8) == 4.0
 
 
 def test_availability_multiplier_active():

@@ -79,7 +79,7 @@ if not gives or not receives:
     st.stop()
 
 with st.spinner("Evaluating trade from real rest-of-season values..."):
-    evaluation = build_trade_evaluation(
+    evaluation, breakdowns = build_trade_evaluation(
         league,
         my_roster,
         their_roster,
@@ -113,3 +113,37 @@ rows = [
     },
 ]
 st.dataframe(rows, hide_index=True)
+
+st.subheader("Why")
+st.caption(
+    "Each player's rest-of-season value: recency-weighted baseline, opportunity "
+    "trend, TD/efficiency regression toward nflverse's expected-points model, "
+    "average strength of remaining schedule, age-curve adjustment, and "
+    "availability -- weighted across remaining games (byes excluded, playoff "
+    "weeks weighted higher)."
+)
+
+
+def render_breakdown(column, player_id: str) -> None:
+    breakdown = breakdowns.get(player_id)
+    column.write(f"**{player_name(player_id)}**")
+    if breakdown is None:
+        column.write("—")
+        return
+    column.table(
+        {
+            "Component": list(breakdown.components),
+            "Points": [f"{breakdown.components[k]:.2f}" for k in breakdown.components],
+        }
+    )
+
+
+st.write("**You give**")
+give_cols = st.columns(len(gives))
+for col, pid in zip(give_cols, gives):
+    render_breakdown(col, pid)
+
+st.write("**You receive**")
+receive_cols = st.columns(len(receives))
+for col, pid in zip(receive_cols, receives):
+    render_breakdown(col, pid)

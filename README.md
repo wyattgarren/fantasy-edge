@@ -43,13 +43,18 @@ streamlit run app/main.py
 ```
 
 Enter a Sleeper username on the Home page to connect a league, then use the
-My Team / League / Start/Sit / Waiver Wire pages. Start/Sit shows a
-live-projected optimal lineup (with a Safe↔Upside risk slider), a verdict
-box of recommended swaps, and a side-by-side player compare with full
-projection breakdowns. Waiver Wire ranks real free agents by a rest-of-
-season projection, your team's positional need, and Sleeper trending adds,
-with a suggested drop and (for FAAB leagues) a bid-percent range. Works on
-mobile browsers too (tested against an emulated iPhone viewport).
+My Team / League / Start/Sit / Waiver Wire / Matchup Simulator / Trade
+Analyzer pages. Start/Sit shows a live-projected optimal lineup (with a
+Safe↔Upside risk slider), a verdict box of recommended swaps, and a
+side-by-side player compare with full projection breakdowns. Waiver Wire
+ranks real free agents by a rest-of-season projection, your team's
+positional need, and Sleeper trending adds, with a suggested drop and (for
+FAAB leagues) a bid-percent range. Matchup Simulator runs a 10,000-run
+Monte Carlo on this week's real matchup for a win probability, score
+range, and which players swing it most. Trade Analyzer compares
+rest-of-season value *and* each side's actual starting-lineup impact, with
+an accept/decline/counter verdict. Works on mobile browsers too (tested
+against an emulated iPhone viewport).
 
 ## Projection model backtest
 
@@ -93,5 +98,5 @@ pass (see `data/stats.py`'s module docstring).
 - [x] Phase 2: Projection model and backtest
 - [x] Phase 3: Start/sit and lineup optimizer
 - [x] Phase 4: Waiver wire
-- [ ] Phase 5: Matchup simulator and trade analyzer
+- [x] Phase 5: Matchup simulator and trade analyzer
 - [ ] Phase 6: Polish and portfolio

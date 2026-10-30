@@ -6,6 +6,7 @@ here -- core/projection.py and core/backtest.py only ever see plain numbers.
 from __future__ import annotations
 
 from pathlib import Path
+from statistics import mean
 
 import nflreadpy as nfl
 import polars as pl
@@ -197,3 +198,32 @@ def opportunity_shares(
             "snap_pct",
         ]
     )
+
+
+def player_weekly_points_and_shares(
+    sleeper_id: str,
+    weekly_points: pl.DataFrame,
+    opportunity: pl.DataFrame,
+    sleeper_to_gsis: dict[str, str | None],
+    week: int,
+) -> tuple[list[float], float, float]:
+    """A player's (weekly_points list, recent_share, season_share) through
+    weeks strictly before `week`. Shared by any caller that needs the same
+    per-player feature extraction data/projections.py and data/waiver.py
+    each already do inline."""
+    gsis_id = sleeper_to_gsis.get(sleeper_id)
+    prior_rows = weekly_points.filter(
+        (weekly_points["player_id"] == gsis_id) & (weekly_points["week"] < week)
+    ).sort("week")
+    weekly_points_list = prior_rows["fantasy_points"].to_list()
+
+    opp_rows = opportunity.filter(
+        (opportunity["sleeper_id"] == sleeper_id) & (opportunity["week"] < week)
+    ).sort("week")
+    share_by_week = dict(zip(opp_rows["week"].to_list(), opp_rows["opportunity_share"].to_list()))
+    prior_weeks = sorted(share_by_week)
+    recent_weeks = prior_weeks[-3:]
+    recent_share = mean(share_by_week[w] for w in recent_weeks) if recent_weeks else 0.0
+    season_share = mean(share_by_week[w] for w in prior_weeks) if prior_weeks else 0.0
+
+    return weekly_points_list, recent_share, season_share

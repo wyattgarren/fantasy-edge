@@ -1,0 +1,199 @@
+"""Weekly player stats, snap counts, schedules, and the player-ID crosswalk,
+via nflreadpy. All nflreadpy/polars/ID-crosswalk/team-code integration lives
+here -- core/projection.py and core/backtest.py only ever see plain numbers.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import nflreadpy as nfl
+import polars as pl
+
+from core.scoring import score_stat_line
+
+nfl.config.update_config(
+    cache_mode="filesystem",
+    cache_dir=Path(".cache/nflreadpy"),
+    cache_duration=24 * 60 * 60,
+)
+
+# nflverse uses "LA" for the Rams; Sleeper uses "LAR". Every other team code
+# matches between the two (confirmed against the real 2026 schedule/rosters).
+TEAM_CODE_FIXES = {"LA": "LAR"}
+
+# nflverse player-stats column -> Sleeper scoring_settings key. Covers the
+# skill-position (QB/RB/WR/TE) stats a standard scoring_settings scores on.
+# K/DEF fantasy points aren't computed here -- DEF scoring is a team-level
+# stat (points allowed, sacks, turnovers) nflreadpy's player_stats doesn't
+# carry, and K needs a much more granular FG-distance mapping; out of scope
+# for Phase 2.
+STAT_KEY_MAP = {
+    "completions": "pass_cmp",
+    "attempts": "pass_att",
+    "passing_yards": "pass_yd",
+    "passing_tds": "pass_td",
+    "passing_interceptions": "pass_int",
+    "passing_2pt_conversions": "pass_2pt",
+    "passing_first_downs": "pass_fd",
+    "carries": "rush_att",
+    "rushing_yards": "rush_yd",
+    "rushing_tds": "rush_td",
+    "rushing_2pt_conversions": "rush_2pt",
+    "rushing_first_downs": "rush_fd",
+    "receptions": "rec",
+    "receiving_yards": "rec_yd",
+    "receiving_tds": "rec_td",
+    "receiving_2pt_conversions": "rec_2pt",
+    "receiving_first_downs": "rec_fd",
+}
+
+SKILL_POSITIONS = ["QB", "RB", "WR", "TE"]
+
+
+def _fix_team_codes(df: pl.DataFrame, *columns: str) -> pl.DataFrame:
+    for col in columns:
+        df = df.with_columns(pl.col(col).replace(TEAM_CODE_FIXES))
+    return df
+
+
+def load_player_id_map() -> pl.DataFrame:
+    """sleeper_id <-> gsis_id (player_stats) <-> pfr_id (snap_counts)."""
+    ids = nfl.load_ff_playerids()
+    return (
+        ids.select(["sleeper_id", "gsis_id", "pfr_id", "name"])
+        .filter(pl.col("sleeper_id").is_not_null())
+        .with_columns(pl.col("sleeper_id").cast(pl.Utf8))
+    )
+
+
+def load_weekly_stats(season: str) -> pl.DataFrame:
+    df = nfl.load_player_stats(seasons=[int(season)])
+    df = df.filter(pl.col("season_type") == "REG")
+    return _fix_team_codes(df, "team", "opponent_team")
+
+
+def load_snap_counts(season: str) -> pl.DataFrame:
+    df = nfl.load_snap_counts(seasons=[int(season)])
+    df = df.filter(pl.col("game_type") == "REG")
+    return _fix_team_codes(df, "team", "opponent")
+
+
+def load_schedules(season: str) -> pl.DataFrame:
+    df = nfl.load_schedules(seasons=[int(season)])
+    df = df.filter(pl.col("game_type") == "REG")
+    return _fix_team_codes(df, "home_team", "away_team")
+
+
+def is_bye_week(schedules: pl.DataFrame, team: str, week: int) -> bool:
+    played = schedules.filter(
+        (pl.col("week") == week) & ((pl.col("home_team") == team) | (pl.col("away_team") == team))
+    )
+    return played.height == 0
+
+
+def weekly_fantasy_points(
+    weekly_stats: pl.DataFrame, scoring_settings: dict[str, float]
+) -> pl.DataFrame:
+    """Adds a `fantasy_points` column computed from each row's raw stats
+    under `scoring_settings` via core.scoring.score_stat_line (skill
+    positions only -- see STAT_KEY_MAP)."""
+    df = weekly_stats.filter(pl.col("position").is_in(SKILL_POSITIONS))
+    df = df.with_columns(
+        fum_lost=(
+            pl.col("rushing_fumbles_lost").fill_null(0)
+            + pl.col("receiving_fumbles_lost").fill_null(0)
+            + pl.col("sack_fumbles_lost").fill_null(0)
+        )
+    )
+    stat_cols = list(STAT_KEY_MAP) + ["fum_lost"]
+    key_for = {**STAT_KEY_MAP, "fum_lost": "fum_lost"}
+
+    points = [
+        score_stat_line({key_for[c]: (row[c] or 0) for c in stat_cols}, scoring_settings)
+        for row in df.select(stat_cols).iter_rows(named=True)
+    ]
+    return df.with_columns(pl.Series("fantasy_points", points))
+
+
+def points_allowed_by_position(weekly_points: pl.DataFrame) -> pl.DataFrame:
+    """Per (opponent_team, position, week): total fantasy points that
+    opponent_team's defense allowed to that position."""
+    return (
+        weekly_points.group_by(["opponent_team", "position", "week"])
+        .agg(pl.col("fantasy_points").sum().alias("points_allowed"))
+        .sort(["position", "week", "opponent_team"])
+    )
+
+
+def points_allowed_through_week(
+    points_allowed: pl.DataFrame, team: str, position: str, before_week: int
+) -> float | None:
+    """Average fantasy points `team`'s defense has allowed to `position` in
+    weeks strictly before `before_week`. None if there's no prior data."""
+    rows = points_allowed.filter(
+        (pl.col("opponent_team") == team)
+        & (pl.col("position") == position)
+        & (pl.col("week") < before_week)
+    )
+    if rows.height == 0:
+        return None
+    return float(rows["points_allowed"].mean())
+
+
+def league_avg_points_allowed_through_week(
+    points_allowed: pl.DataFrame, position: str, before_week: int
+) -> float | None:
+    """League-wide average points allowed to `position` in weeks strictly
+    before `before_week`. None if there's no prior data."""
+    rows = points_allowed.filter((pl.col("position") == position) & (pl.col("week") < before_week))
+    if rows.height == 0:
+        return None
+    return float(rows["points_allowed"].mean())
+
+
+def opportunity_shares(
+    weekly_stats: pl.DataFrame, snap_counts: pl.DataFrame, player_id_map: pl.DataFrame
+) -> pl.DataFrame:
+    """Per player/week: a position-appropriate opportunity share (target
+    share for WR/TE, carry share for RB, attempt share for QB) plus snap %,
+    joined in via the sleeper_id/gsis_id/pfr_id crosswalk."""
+    team_carries = weekly_stats.group_by(["team", "week"]).agg(
+        pl.col("carries").sum().alias("team_carries")
+    )
+    team_attempts = weekly_stats.group_by(["team", "week"]).agg(
+        pl.col("attempts").sum().alias("team_attempts")
+    )
+
+    df = weekly_stats.join(team_carries, on=["team", "week"], how="left")
+    df = df.join(team_attempts, on=["team", "week"], how="left")
+    df = df.with_columns(
+        opportunity_share=pl.when(pl.col("position") == "RB")
+        .then(pl.col("carries") / pl.col("team_carries"))
+        .when(pl.col("position") == "QB")
+        .then(pl.col("attempts") / pl.col("team_attempts"))
+        .otherwise(pl.col("target_share"))
+        .fill_null(0.0)
+    )
+
+    ids = player_id_map.select(["sleeper_id", "gsis_id", "pfr_id"])
+    df = df.join(ids, left_on="player_id", right_on="gsis_id", how="left")
+
+    snaps = snap_counts.select(["pfr_player_id", "week", "offense_pct"]).rename(
+        {"pfr_player_id": "pfr_id", "offense_pct": "snap_pct"}
+    )
+    df = df.join(snaps, on=["pfr_id", "week"], how="left")
+    df = df.with_columns(pl.col("snap_pct").fill_null(0.0))
+
+    return df.select(
+        [
+            "sleeper_id",
+            "player_id",
+            "player_display_name",
+            "position",
+            "team",
+            "week",
+            "opportunity_share",
+            "snap_pct",
+        ]
+    )

@@ -114,28 +114,77 @@ rows = [
 ]
 st.dataframe(rows, hide_index=True)
 
+FACTOR_LABELS: dict[str, str] = {
+    "baseline": "Recent scoring",
+    "opportunity": "Role trend",
+    "regression": "TD luck adjustment",
+    "matchup_adjustment": "Schedule strength",
+    "age_multiplier": "Age factor",
+    "availability_multiplier": "Health status",
+    "per_game": "Projected per game",
+    "games_weight": "Weighted games left",
+}
+
+FACTOR_EXPLANATIONS: dict[str, str] = {
+    "baseline": "How many points they've scored per game recently, weighted toward their most recent games.",
+    "opportunity": "Whether their share of their team's targets, carries, and snaps is trending up or down.",
+    "regression": (
+        "Nudges scoring back toward what their usage and efficiency should produce, "
+        "correcting for touchdown or big-play luck that tends to even out over time."
+    ),
+    "matchup_adjustment": "How tough their remaining opponents are, on average, compared to a typical schedule.",
+    "age_multiplier": "A discount for players at an age when their position historically starts to decline.",
+    "availability_multiplier": (
+        "A discount applied only to their very next game if they're currently banged up, "
+        "based on their current injury tag."
+    ),
+    "per_game": "The final per-game rate after combining all the factors above.",
+    "games_weight": "How many games remain this season, with byes removed and the fantasy playoffs counted extra.",
+}
+
 st.subheader("Why")
-st.caption(
-    "Each player's rest-of-season value: recency-weighted baseline, opportunity "
-    "trend, TD/efficiency regression toward nflverse's expected-points model, "
-    "average strength of remaining schedule, age-curve adjustment, and "
-    "availability -- weighted across remaining games (byes excluded, playoff "
-    "weeks weighted higher)."
-)
+with st.expander("What goes into this number?"):
+    st.table(
+        {
+            "Factor": [FACTOR_LABELS[k] for k in FACTOR_LABELS],
+            "What it means": [FACTOR_EXPLANATIONS[k] for k in FACTOR_LABELS],
+        }
+    )
+    st.caption("Rest-of-season total = Projected per game × Weighted games left.")
 
 
 def render_breakdown(column, player_id: str) -> None:
     breakdown = breakdowns.get(player_id)
+    player = players.get(player_id)
     column.write(f"**{player_name(player_id)}**")
     if breakdown is None:
         column.write("—")
         return
-    column.table(
-        {
-            "Component": list(breakdown.components),
-            "Points": [f"{breakdown.components[k]:.2f}" for k in breakdown.components],
-        }
+
+    status = (player.injury_status or player.status or "Active") if player else "Unknown"
+
+    column.metric(
+        "Rest-of-season value",
+        f"{breakdown.total:.1f} pts",
+        help=(
+            f"{breakdown.per_game:.1f} pts/gm projected × "
+            f"{breakdown.games_weight:.1f} weighted games left."
+        ),
     )
+    if player is not None:
+        column.write(f"{player.position} · {player.team} · {status}")
+
+    rows = [
+        ("Recent scoring", f"{breakdown.baseline:.1f} pts/gm"),
+        ("Role trend", f"{breakdown.opportunity:+.1f} pts/gm"),
+        ("TD luck adjustment", f"{breakdown.regression:+.1f} pts/gm"),
+        ("Schedule strength", f"{breakdown.avg_matchup_adjustment:+.1f} pts/gm"),
+        ("Age factor", f"{breakdown.age_multiplier:.0%}"),
+        ("Health status", f"{breakdown.availability_multiplier:.0%} ({status})"),
+        ("Projected per game", f"{breakdown.per_game:.1f} pts/gm"),
+        ("Weighted games left", f"{breakdown.games_weight:.1f} games"),
+    ]
+    column.table({"Factor": [r[0] for r in rows], "Value": [r[1] for r in rows]})
 
 
 st.write("**You give**")

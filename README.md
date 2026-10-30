@@ -43,8 +43,10 @@ streamlit run app/main.py
 ```
 
 Enter a Sleeper username on the Home page to connect a league, then use the
-My Team / League pages. Works on mobile browsers too (tested against an
-emulated iPhone viewport).
+My Team / League / Start/Sit pages. Start/Sit shows a live-projected optimal
+lineup (with a Safe↔Upside risk slider), a verdict box of recommended swaps,
+and a side-by-side player compare with full projection breakdowns. Works on
+mobile browsers too (tested against an emulated iPhone viewport).
 
 ## Projection model backtest
 
@@ -86,7 +88,7 @@ pass (see `data/stats.py`'s module docstring).
 - [x] Phase 0: Project setup and Sleeper client
 - [x] Phase 1: Connect a league
 - [x] Phase 2: Projection model and backtest
-- [ ] Phase 3: Start/sit and lineup optimizer
+- [x] Phase 3: Start/sit and lineup optimizer
 - [ ] Phase 4: Waiver wire
 - [ ] Phase 5: Matchup simulator and trade analyzer
 - [ ] Phase 6: Polish and portfolio

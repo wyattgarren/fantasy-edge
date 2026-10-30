@@ -21,6 +21,7 @@ pg = st.navigation(
         st.Page("pages/home.py", title="Home", icon=":material/home:", default=True),
         st.Page("pages/my_team.py", title="My Team", icon=":material/person:"),
         st.Page("pages/league.py", title="League", icon=":material/groups:"),
+        st.Page("pages/start_sit.py", title="Start/Sit", icon=":material/swap_horiz:"),
     ]
 )
 pg.run()

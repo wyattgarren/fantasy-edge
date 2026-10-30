@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+from app.client import get_client
+from data.demo import DEMO_LEAGUE_ID, DEMO_USER_ID, DEMO_USERNAME
 from data.exceptions import SleeperAPIError
 from data.sleeper import SleeperClient
 
@@ -54,3 +56,19 @@ def ensure_connected(client: SleeperClient) -> None:
 
 def is_connected() -> bool:
     return bool(st.session_state.get("league_id")) and bool(st.session_state.get("roster_id"))
+
+
+def seed_demo_session_state() -> None:
+    """Connects the session to the bundled demo league instead of a real
+    Sleeper account -- same session-state contract a real connection sets
+    (home.py), so every page's existing guard/logic works unmodified."""
+    client = get_client(demo=True)
+    rosters = client.get_rosters(DEMO_LEAGUE_ID)
+    my_roster = next(r for r in rosters if r.owner_id == DEMO_USER_ID)
+
+    st.session_state["demo_mode"] = True
+    st.session_state["username"] = DEMO_USERNAME
+    st.session_state["user_id"] = DEMO_USER_ID
+    st.session_state["season"] = client.get_league(DEMO_LEAGUE_ID).season
+    st.session_state["league_id"] = DEMO_LEAGUE_ID
+    st.session_state["roster_id"] = my_roster.roster_id

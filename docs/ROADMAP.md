@@ -79,8 +79,9 @@ The heart of the app. Keep it simple, transparent, and measurable.
 
 ## Phase 6: Polish and portfolio
 
+*(Weekly Discord report dropped from scope — the owner's league doesn't use Discord.)*
+
 - **Optional AI explanations (free):** with `LLM_PROVIDER=ollama`, a local model turns the computed numbers into a short paragraph. Pass it only the computed figures and tell it not to add stats. Without Ollama, the app uses template sentences, and everything else still works.
-- **Weekly report (optional):** a script (run by GitHub Actions on a schedule) posts Tuesday waiver targets and Thursday start/sit calls to a Discord webhook (free).
 - **Demo mode:** a bundled sample league from the fixtures, so anyone can try the app without a Sleeper account.
 - **Deploy** to Streamlit Community Cloud. Add the live link to the README and GitHub repo description.
 - **README:** screenshots/GIF, an architecture diagram, how the projection model works, the **backtest results table**, and "what I'd improve next."

@@ -21,16 +21,17 @@ def project_roster_week(
     players: dict[str, Player],
     season: str,
     week: int,
+    demo: bool = False,
 ) -> dict[str, Projection]:
     scoring_settings = league.scoring_settings
 
-    weekly_stats = stats.load_weekly_stats(season)
+    weekly_stats = stats.load_weekly_stats(season, demo=demo)
     weekly_points = stats.weekly_fantasy_points(weekly_stats, scoring_settings)
     points_allowed = stats.points_allowed_by_position(weekly_points)
-    snap_counts = stats.load_snap_counts(season)
-    id_map = stats.load_player_id_map()
+    snap_counts = stats.load_snap_counts(season, demo=demo)
+    id_map = stats.load_player_id_map(demo=demo)
     opportunity = stats.opportunity_shares(weekly_stats, snap_counts, id_map)
-    schedules = stats.load_schedules(season)
+    schedules = stats.load_schedules(season, demo=demo)
 
     projections: dict[str, Projection] = {}
 

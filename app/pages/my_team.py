@@ -1,6 +1,7 @@
 import streamlit as st
 
 from app.client import get_client
+from app.components import demo_mode, page_caption
 from data.exceptions import SleeperAPIError
 
 st.title("My Team")
@@ -11,7 +12,7 @@ if not st.session_state.get("league_id") or not st.session_state.get("roster_id"
         st.switch_page("pages/home.py")
     st.stop()
 
-client = get_client()
+client = get_client(demo_mode())
 league_id = st.session_state["league_id"]
 roster_id = st.session_state["roster_id"]
 
@@ -32,7 +33,7 @@ if my_roster is None:
     st.stop()
 
 names_by_user_id = {u.user_id: (u.display_name or u.user_id) for u in league_users}
-st.caption(f"{league.name.strip()} · {league.season} season, week {nfl_state.week}")
+page_caption(league.name, league.season, nfl_state.week)
 
 
 def player_row(player_id: str, slot: str) -> dict[str, str]:

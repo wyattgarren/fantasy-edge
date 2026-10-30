@@ -1,10 +1,27 @@
 import streamlit as st
 
 from app.client import get_client
-from app.state import save_to_query_params
+from app.components import demo_mode
+from app.state import save_to_query_params, seed_demo_session_state
 from data.exceptions import SleeperAPIError, UserNotFoundError
 
 st.title("Connect your Sleeper league")
+
+if demo_mode():
+    st.info("You're viewing the demo league with sample data.")
+    if st.button("Exit demo / connect your own league", type="primary"):
+        for key in ("demo_mode", "username", "user_id", "season", "league_id", "roster_id"):
+            st.session_state.pop(key, None)
+        st.query_params.pop("demo", None)
+        st.rerun()
+    st.stop()
+
+if st.button("Try the demo instead", help="No Sleeper account needed -- browse a real, frozen sample league."):
+    seed_demo_session_state()
+    st.query_params["demo"] = "1"
+    st.switch_page("pages/my_team.py")
+
+st.divider()
 
 client = get_client()
 
@@ -22,6 +39,8 @@ if find_clicked and username_input:
         st.stop()
     st.session_state["username"] = username_input
     st.session_state["user_id"] = user.user_id
+    st.session_state["demo_mode"] = False
+    st.query_params.pop("demo", None)
     st.session_state.pop("league_id", None)
     st.session_state.pop("roster_id", None)
 

@@ -44,13 +44,14 @@ def build_trade_evaluation(
     receives: list[str],
     season: str,
     week: int,
+    demo: bool = False,
 ) -> TradeEvaluation:
     remaining_weeks = max(int(league.settings.get("playoff_week_start") or week + 1) - week, 1)
 
-    weekly_stats = stats.load_weekly_stats(season)
+    weekly_stats = stats.load_weekly_stats(season, demo=demo)
     weekly_points = stats.weekly_fantasy_points(weekly_stats, league.scoring_settings)
-    snap_counts = stats.load_snap_counts(season)
-    id_map = stats.load_player_id_map()
+    snap_counts = stats.load_snap_counts(season, demo=demo)
+    id_map = stats.load_player_id_map(demo=demo)
     opportunity = stats.opportunity_shares(weekly_stats, snap_counts, id_map)
     sleeper_to_gsis = dict(zip(id_map["sleeper_id"].to_list(), id_map["gsis_id"].to_list()))
 

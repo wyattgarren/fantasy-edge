@@ -1,8 +1,10 @@
 import streamlit as st
 
 from app.client import get_client
+from app.components import demo_mode, page_caption
 from core.lineup import lineup_value, optimal_lineup
 from data.exceptions import SleeperAPIError
+from data.llm import explain
 from data.projections import opponent_this_week, project_roster_week
 import data.stats as stats
 
@@ -14,7 +16,8 @@ if not st.session_state.get("league_id") or not st.session_state.get("roster_id"
         st.switch_page("pages/home.py")
     st.stop()
 
-client = get_client()
+demo = demo_mode()
+client = get_client(demo)
 league_id = st.session_state["league_id"]
 roster_id = st.session_state["roster_id"]
 
@@ -32,11 +35,13 @@ if my_roster is None:
     st.error("Your team wasn't found in this league anymore.")
     st.stop()
 
-st.caption(f"{league.name.strip()} · {league.season} season, week {nfl_state.week}")
+page_caption(league.name, league.season, nfl_state.week)
 
 with st.spinner("Computing projections from real stats..."):
-    projections = project_roster_week(league, my_roster, players, league.season, nfl_state.week)
-    schedules = stats.load_schedules(league.season)
+    projections = project_roster_week(
+        league, my_roster, players, league.season, nfl_state.week, demo=demo
+    )
+    schedules = stats.load_schedules(league.season, demo=demo)
 
 if not projections:
     st.info("No skill-position (QB/RB/WR/TE) players with projections were found on this roster.")
@@ -84,7 +89,7 @@ else:
         for slot, rec, cur, delta in changes
     )
     verb_phrase = "Make this 1 change" if len(changes) == 1 else f"Make these {len(changes)} changes"
-    st.info(f"{verb_phrase}:\n\n{lines}")
+    st.info(explain(f"{verb_phrase}:\n\n{lines}"))
 
 st.subheader("Recommended lineup")
 rows = []

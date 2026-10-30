@@ -21,9 +21,12 @@ def build_matchup_simulation(
     week: int,
     runs: int = DEFAULT_RUNS,
     seed: int | None = None,
+    demo: bool = False,
 ) -> SimulationResult:
-    my_projections = project_roster_week(league, my_roster, players, season, week)
-    opponent_projections = project_roster_week(league, opponent_roster, players, season, week)
+    my_projections = project_roster_week(league, my_roster, players, season, week, demo=demo)
+    opponent_projections = project_roster_week(
+        league, opponent_roster, players, season, week, demo=demo
+    )
 
     def starter_distributions(roster: Roster, projections) -> list[PlayerDistribution]:
         distributions = []

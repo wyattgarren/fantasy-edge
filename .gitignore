@@ -7,6 +7,7 @@ venv/
 
 .cache/
 *.parquet
+!data/demo_data/stats/*.parquet
 
 .env
 .DS_Store

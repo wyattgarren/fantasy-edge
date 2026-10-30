@@ -111,18 +111,19 @@ def build_waiver_board(
     players: dict[str, Player],
     season: str,
     week: int,
+    demo: bool = False,
 ) -> tuple[list[WaiverTarget], int]:
     """Returns (waiver targets sorted by score descending, total relevant
     free-agent pool size)."""
     remaining_weeks = max(int(league.settings.get("playoff_week_start") or week + 1) - week, 1)
     is_faab = float(league.settings.get("waiver_budget") or 0) > 0
 
-    weekly_stats = stats.load_weekly_stats(season)
+    weekly_stats = stats.load_weekly_stats(season, demo=demo)
     weekly_points = stats.weekly_fantasy_points(weekly_stats, league.scoring_settings)
-    snap_counts = stats.load_snap_counts(season)
-    id_map = stats.load_player_id_map()
+    snap_counts = stats.load_snap_counts(season, demo=demo)
+    id_map = stats.load_player_id_map(demo=demo)
     opportunity = stats.opportunity_shares(weekly_stats, snap_counts, id_map)
-    schedules = stats.load_schedules(season)
+    schedules = stats.load_schedules(season, demo=demo)
 
     sleeper_to_gsis = dict(zip(id_map["sleeper_id"].to_list(), id_map["gsis_id"].to_list()))
     played_gsis_ids = set(weekly_points["player_id"].unique().to_list())

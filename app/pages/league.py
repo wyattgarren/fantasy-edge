@@ -1,6 +1,7 @@
 import streamlit as st
 
 from app.client import get_client
+from app.components import demo_mode, page_caption
 from data.exceptions import SleeperAPIError
 
 st.title("League")
@@ -11,7 +12,7 @@ if not st.session_state.get("league_id"):
         st.switch_page("pages/home.py")
     st.stop()
 
-client = get_client()
+client = get_client(demo_mode())
 league_id = st.session_state["league_id"]
 my_roster_id = st.session_state.get("roster_id")
 
@@ -25,7 +26,7 @@ except SleeperAPIError as exc:
     st.stop()
 
 names_by_user_id = {u.user_id: (u.display_name or u.user_id) for u in league_users}
-st.caption(f"{league.name.strip()} · {league.season} season")
+page_caption(league.name, league.season)
 
 
 def combined_points(settings: dict, whole_key: str, decimal_key: str) -> float:

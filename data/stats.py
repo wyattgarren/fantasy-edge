@@ -19,6 +19,8 @@ nfl.config.update_config(
     cache_duration=24 * 60 * 60,
 )
 
+DEMO_DATA_DIR = Path(__file__).resolve().parent / "demo_data" / "stats"
+
 # nflverse uses "LA" for the Rams; Sleeper uses "LAR". Every other team code
 # matches between the two (confirmed against the real 2026 schedule/rosters).
 TEAM_CODE_FIXES = {"LA": "LAR"}
@@ -58,8 +60,10 @@ def _fix_team_codes(df: pl.DataFrame, *columns: str) -> pl.DataFrame:
     return df
 
 
-def load_player_id_map() -> pl.DataFrame:
+def load_player_id_map(demo: bool = False) -> pl.DataFrame:
     """sleeper_id <-> gsis_id (player_stats) <-> pfr_id (snap_counts)."""
+    if demo:
+        return pl.read_parquet(DEMO_DATA_DIR / "player_ids.parquet")
     ids = nfl.load_ff_playerids()
     return (
         ids.select(["sleeper_id", "gsis_id", "pfr_id", "name"])
@@ -68,19 +72,25 @@ def load_player_id_map() -> pl.DataFrame:
     )
 
 
-def load_weekly_stats(season: str) -> pl.DataFrame:
+def load_weekly_stats(season: str, demo: bool = False) -> pl.DataFrame:
+    if demo:
+        return pl.read_parquet(DEMO_DATA_DIR / "weekly_stats.parquet")
     df = nfl.load_player_stats(seasons=[int(season)])
     df = df.filter(pl.col("season_type") == "REG")
     return _fix_team_codes(df, "team", "opponent_team")
 
 
-def load_snap_counts(season: str) -> pl.DataFrame:
+def load_snap_counts(season: str, demo: bool = False) -> pl.DataFrame:
+    if demo:
+        return pl.read_parquet(DEMO_DATA_DIR / "snap_counts.parquet")
     df = nfl.load_snap_counts(seasons=[int(season)])
     df = df.filter(pl.col("game_type") == "REG")
     return _fix_team_codes(df, "team", "opponent")
 
 
-def load_schedules(season: str) -> pl.DataFrame:
+def load_schedules(season: str, demo: bool = False) -> pl.DataFrame:
+    if demo:
+        return pl.read_parquet(DEMO_DATA_DIR / "schedules.parquet")
     df = nfl.load_schedules(seasons=[int(season)])
     df = df.filter(pl.col("game_type") == "REG")
     return _fix_team_codes(df, "home_team", "away_team")

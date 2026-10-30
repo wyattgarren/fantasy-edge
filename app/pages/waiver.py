@@ -1,7 +1,9 @@
 import streamlit as st
 
 from app.client import get_client
+from app.components import demo_mode, page_caption
 from data.exceptions import SleeperAPIError
+from data.llm import explain
 from data.waiver import build_waiver_board
 
 st.title("Waiver Wire")
@@ -12,7 +14,8 @@ if not st.session_state.get("league_id") or not st.session_state.get("roster_id"
         st.switch_page("pages/home.py")
     st.stop()
 
-client = get_client()
+demo = demo_mode()
+client = get_client(demo)
 league_id = st.session_state["league_id"]
 roster_id = st.session_state["roster_id"]
 
@@ -30,7 +33,7 @@ if my_roster is None:
     st.error("Your team wasn't found in this league anymore.")
     st.stop()
 
-st.caption(f"{league.name.strip()} · {league.season} season, week {nfl_state.week}")
+page_caption(league.name, league.season, nfl_state.week)
 
 is_faab = float(league.settings.get("waiver_budget") or 0) > 0
 if is_faab:
@@ -53,7 +56,7 @@ def player_name(player_id: str | None) -> str:
 
 with st.spinner("Ranking free agents from real stats..."):
     targets, pool_size = build_waiver_board(
-        client, league, rosters, my_roster, players, league.season, nfl_state.week
+        client, league, rosters, my_roster, players, league.season, nfl_state.week, demo=demo
     )
 
 st.subheader("Verdict")
@@ -66,7 +69,7 @@ else:
         parts.append(f"drop **{player_name(top.suggested_drop_player_id)}**")
     if top.bid_low is not None and top.bid_high is not None:
         parts.append(f"bid **{top.bid_low:.0f}-{top.bid_high:.0f}%**")
-    st.success(", ".join(parts))
+    st.success(explain(", ".join(parts)))
 
     st.subheader("Targets")
     st.caption(f"Showing top {min(50, len(targets))} of {pool_size} relevant free agents (ranked by score).")

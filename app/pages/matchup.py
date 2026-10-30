@@ -1,7 +1,9 @@
 import streamlit as st
 
 from app.client import get_client
+from app.components import demo_mode, page_caption
 from data.exceptions import SleeperAPIError
+from data.llm import explain
 from data.simulate import build_matchup_simulation
 
 st.title("Matchup Simulator")
@@ -12,7 +14,8 @@ if not st.session_state.get("league_id") or not st.session_state.get("roster_id"
         st.switch_page("pages/home.py")
     st.stop()
 
-client = get_client()
+demo = demo_mode()
+client = get_client(demo)
 league_id = st.session_state["league_id"]
 roster_id = st.session_state["roster_id"]
 
@@ -32,7 +35,7 @@ if my_roster is None:
     st.error("Your team wasn't found in this league anymore.")
     st.stop()
 
-st.caption(f"{league.name.strip()} · {league.season} season, week {nfl_state.week}")
+page_caption(league.name, league.season, nfl_state.week)
 
 my_matchup = next((m for m in matchups if m.roster_id == roster_id), None)
 opponent_matchup = (
@@ -64,7 +67,9 @@ def player_name(player_id: str) -> str:
 
 
 with st.spinner(f"Running 10,000 simulations vs. {opponent_name}..."):
-    result = build_matchup_simulation(league, my_roster, opponent_roster, players, league.season, nfl_state.week)
+    result = build_matchup_simulation(
+        league, my_roster, opponent_roster, players, league.season, nfl_state.week, demo=demo
+    )
 
 st.caption("K/DEF aren't modeled (see Phase 2/3) and are excluded from the simulation.")
 
@@ -73,6 +78,16 @@ col1, col2, col3 = st.columns(3)
 col1.metric("Win probability", f"{result.win_probability * 100:.0f}%")
 col2.metric("Projected score", f"{result.my_mean:.1f} - {result.opponent_mean:.1f}")
 col3.metric("Score range", f"{result.my_floor:.1f} - {result.my_ceiling:.1f}")
+
+if result.swing_players:
+    top_pid, top_swing = result.swing_players[0]
+    verdict_sentence = (
+        f"You're a {result.win_probability * 100:.0f}% favorite, projected "
+        f"{result.my_mean:.1f}-{result.opponent_mean:.1f} vs. {opponent_name}. "
+        f"**{player_name(top_pid)}** swings this matchup the most ({top_swing:+.1f} pts "
+        "between your wins and losses) -- worth watching closely."
+    )
+    st.info(explain(verdict_sentence))
 
 st.subheader("Who swings this matchup")
 st.caption(

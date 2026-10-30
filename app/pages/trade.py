@@ -1,7 +1,9 @@
 import streamlit as st
 
 from app.client import get_client
+from app.components import demo_mode, page_caption
 from data.exceptions import SleeperAPIError
+from data.llm import explain
 from data.projections import SKILL_POSITIONS
 from data.trade import build_trade_evaluation
 
@@ -13,7 +15,8 @@ if not st.session_state.get("league_id") or not st.session_state.get("roster_id"
         st.switch_page("pages/home.py")
     st.stop()
 
-client = get_client()
+demo = demo_mode()
+client = get_client(demo)
 league_id = st.session_state["league_id"]
 roster_id = st.session_state["roster_id"]
 
@@ -32,7 +35,7 @@ if my_roster is None:
     st.error("Your team wasn't found in this league anymore.")
     st.stop()
 
-st.caption(f"{league.name.strip()} · {league.season} season, week {nfl_state.week}")
+page_caption(league.name, league.season, nfl_state.week)
 
 names_by_user_id = {u.user_id: (u.display_name or u.user_id) for u in league_users}
 
@@ -77,12 +80,20 @@ if not gives or not receives:
 
 with st.spinner("Evaluating trade from real rest-of-season values..."):
     evaluation = build_trade_evaluation(
-        league, my_roster, their_roster, players, gives, receives, league.season, nfl_state.week
+        league,
+        my_roster,
+        their_roster,
+        players,
+        gives,
+        receives,
+        league.season,
+        nfl_state.week,
+        demo=demo,
     )
 
 st.subheader("Verdict")
 verdict_box = {"Accept": st.success, "Decline": st.error, "Counter": st.warning}[evaluation.verdict]
-verdict_box(f"**{evaluation.verdict}** — {evaluation.reason}")
+verdict_box(explain(f"**{evaluation.verdict}** — {evaluation.reason}"))
 
 st.subheader("Before / after")
 rows = [

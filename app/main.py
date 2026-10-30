@@ -10,11 +10,12 @@ if str(REPO_ROOT) not in sys.path:
 import streamlit as st  # noqa: E402
 
 from app.client import get_client  # noqa: E402
-from app.components import demo_mode  # noqa: E402
+from app.components import demo_mode, inject_theme_css  # noqa: E402
 from app.state import ensure_connected, load_from_query_params, seed_demo_session_state  # noqa: E402
 from data import config  # noqa: E402
 
 st.set_page_config(page_title="fantasy-edge", page_icon=":material/sports_football:")
+inject_theme_css()
 load_from_query_params()
 if "demo_mode" not in st.session_state:
     if st.query_params.get("demo") == "1" or config.demo_mode_default():

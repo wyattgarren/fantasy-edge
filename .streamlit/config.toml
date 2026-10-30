@@ -1,3 +1,23 @@
+[theme]
+base = "light"
+primaryColor = "#155EEF"
+backgroundColor = "#F3F5F8"
+secondaryBackgroundColor = "#E7EBF0"
+textColor = "#15181F"
+borderColor = "#C9CFD8"
+dataframeBorderColor = "#C9CFD8"
+dataframeHeaderBackgroundColor = "#E2E6EC"
+dataframeHeaderTextColor = "#15181F"
+linkColor = "#155EEF"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+baseFontWeight = 400
+headingFontWeights = [700, 700, 600, 600, 600, 600]
+baseRadius = "large"
+buttonRadius = "full"
+showWidgetBorder = true
+showSidebarBorder = true
+
 [browser]
 gatherUsageStats = false
 

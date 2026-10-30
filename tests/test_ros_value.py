@@ -6,7 +6,7 @@ on real-shaped data and produces sane output.
 """
 
 from data.demo import DEMO_LEAGUE_ID, DemoSleeperClient
-from data.ros_value import load_ros_context, player_ros_value
+from data.ros_value import compute_vorp, load_ros_context, player_ros_value
 from data.trade import build_trade_evaluation
 from data.waiver import build_waiver_board
 
@@ -54,14 +54,39 @@ def test_build_trade_evaluation_against_demo_data_runs_end_to_end():
     receives = skill_players(their_roster)[:1]
     assert gives and receives
 
-    evaluation, breakdowns = build_trade_evaluation(
-        league, my_roster, their_roster, players, gives, receives, league.season, 7, demo=True
+    evaluation, breakdowns, vorp = build_trade_evaluation(
+        league, rosters, my_roster, their_roster, players, gives, receives, league.season, 7, demo=True
     )
 
     assert evaluation.verdict in {"Accept", "Decline", "Counter"}
     assert set(breakdowns) == set(gives) | set(receives)
     for breakdown in breakdowns.values():
         assert breakdown.total >= 0.0
+
+    assert set(vorp) == set(gives) | set(receives)
+    for value in vorp.values():
+        assert isinstance(value, float)
+
+
+def test_compute_vorp_against_demo_data_ranks_the_top_player_positive():
+    client, league, rosters, players = _demo_league_and_rosters()
+    ctx = load_ros_context(league, league.season, week=7, demo=True)
+
+    vorp_by_player = compute_vorp(ctx, rosters, players, league.roster_positions)
+    assert vorp_by_player
+
+    # the single highest-ros_value RB in the league should show positive
+    # VORP (clearly above replacement level by definition, unless every
+    # rostered RB in the league is below the computed replacement rank).
+    rb_ids = [
+        pid
+        for roster in rosters
+        for pid in roster.players
+        if players.get(pid) is not None and players[pid].position == "RB"
+    ]
+    assert rb_ids
+    best_rb = max(rb_ids, key=lambda pid: player_ros_value(ctx, players[pid], pid).total)
+    assert vorp_by_player[best_rb] >= 0.0
 
 
 def test_build_waiver_board_against_demo_data_runs_end_to_end():

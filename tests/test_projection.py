@@ -1,6 +1,10 @@
 from core.projection import (
+    GAME_SCRIPT_SPREAD_COEFFICIENT,
+    GAME_SCRIPT_TOTAL_COEFFICIENTS,
+    NEUTRAL_TOTAL,
     availability_multiplier,
     baseline_points,
+    game_script_adjustment,
     matchup_adjustment,
     opportunity_adjustment,
     project_player,
@@ -66,6 +70,45 @@ def test_regression_adjustment_partial_shrinkage():
 def test_regression_adjustment_negative_ratio_is_a_positive_boost():
     # underperforming their own expectation (bad luck) -> adjustment helps them
     assert regression_adjustment(-0.4, baseline=20, weeks_played=8) == 4.0
+
+
+def test_game_script_adjustment_rb_spread_effect():
+    # RB, favored by 10, total at exactly neutral -> only the spread term applies
+    result = game_script_adjustment("RB", team_spread=10.0, total_line=NEUTRAL_TOTAL)
+    assert round(result, 4) == round(GAME_SCRIPT_SPREAD_COEFFICIENT * 10.0, 4)
+
+
+def test_game_script_adjustment_non_rb_has_no_spread_effect():
+    # WR, favored by 10, total at exactly neutral -> spread is RB-only, so 0
+    result = game_script_adjustment("WR", team_spread=10.0, total_line=NEUTRAL_TOTAL)
+    assert result == 0.0
+
+
+def test_game_script_adjustment_total_effect_is_position_specific():
+    result = game_script_adjustment("WR", team_spread=0.0, total_line=NEUTRAL_TOTAL + 10.0)
+    assert round(result, 4) == round(GAME_SCRIPT_TOTAL_COEFFICIENTS["WR"] * 10.0, 4)
+
+
+def test_game_script_adjustment_rb_total_effect_is_zero():
+    # empirically ~0 -- total doesn't move RB production like it does the passing game
+    result = game_script_adjustment("RB", team_spread=0.0, total_line=NEUTRAL_TOTAL + 10.0)
+    assert result == 0.0
+
+
+def test_game_script_adjustment_clamps_extreme_spread():
+    # team_spread=30 clamps to the 17.0 bound
+    result = game_script_adjustment("RB", team_spread=30.0, total_line=NEUTRAL_TOTAL)
+    assert round(result, 4) == round(GAME_SCRIPT_SPREAD_COEFFICIENT * 17.0, 4)
+
+
+def test_game_script_adjustment_clamps_extreme_total():
+    # total 50 points above neutral clamps to the 12.0 bound
+    result = game_script_adjustment("QB", team_spread=0.0, total_line=NEUTRAL_TOTAL + 50.0)
+    assert round(result, 4) == round(GAME_SCRIPT_TOTAL_COEFFICIENTS["QB"] * 12.0, 4)
+
+
+def test_game_script_adjustment_unknown_position_is_zero():
+    assert game_script_adjustment("K", team_spread=10.0, total_line=NEUTRAL_TOTAL + 10.0) == 0.0
 
 
 def test_availability_multiplier_active():

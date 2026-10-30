@@ -114,6 +114,28 @@ def opponent_this_week(schedules: pl.DataFrame, team: str, week: int) -> str | N
     return row["away_team"] if row["home_team"] == team else row["home_team"]
 
 
+def team_spread_and_total(
+    schedules: pl.DataFrame, team: str, week: int
+) -> tuple[float, float] | tuple[None, None]:
+    """`team`'s real Vegas spread (positive = `team` favored, sign-flipped
+    from the raw home-team-perspective `spread_line` when `team` is away)
+    and the game's real total, for `week`. (None, None) if no scheduled game
+    is found, or if the line hasn't been posted yet (nflverse leaves future
+    weeks' lines null until closer to kickoff)."""
+    games = schedules.filter(
+        (pl.col("week") == week) & ((pl.col("home_team") == team) | (pl.col("away_team") == team))
+    )
+    if games.height == 0:
+        return None, None
+    row = games.row(0, named=True)
+    spread_line = row["spread_line"]
+    total_line = row["total_line"]
+    if spread_line is None or total_line is None:
+        return None, None
+    team_spread = spread_line if row["home_team"] == team else -spread_line
+    return team_spread, total_line
+
+
 def load_expected_points(season: str, demo: bool = False) -> pl.DataFrame:
     """nflverse's own expected-fantasy-points model (actual vs. expected per
     player/week) -- the TD-rate/efficiency regression signal. No
@@ -184,7 +206,7 @@ def remaining_week_weights(
     return weights
 
 
-def remaining_weeks_and_matchup_adjustment(
+def remaining_weeks_and_schedule_adjustments(
     schedules: pl.DataFrame,
     points_allowed: pl.DataFrame,
     team: str,
@@ -193,18 +215,23 @@ def remaining_weeks_and_matchup_adjustment(
     from_week: int,
     to_week: int,
     before_week: int,
-) -> tuple[list[int], float]:
+) -> tuple[list[int], float, float]:
     """The player's remaining week numbers in [from_week, to_week] with bye
     weeks excluded, plus the average core.projection.matchup_adjustment(...)
-    across those weeks' real scheduled opponents. Every future week's
+    and the average core.projection.game_script_adjustment(...) across
+    those weeks' real scheduled opponents/Vegas lines. Every future week's
     opponent-defense quality is looked up using the SAME `before_week`
     (today's first-unplayed week) -- no future week can see data more
-    recent than what's known today without leaking."""
-    from core.projection import matchup_adjustment
+    recent than what's known today without leaking. A week with no posted
+    Vegas line yet (nflverse leaves future lines null until closer to
+    kickoff) contributes 0.0 to the game-script average, same "missing
+    data -> no adjustment" convention used for missing matchup data."""
+    from core.projection import game_script_adjustment, matchup_adjustment
 
     league_avg = league_avg_points_allowed_through_week(points_allowed, position, before_week)
     weeks: list[int] = []
-    adjustments: list[float] = []
+    matchup_adjustments: list[float] = []
+    game_script_adjustments: list[float] = []
     for week in range(from_week, to_week + 1):
         if is_bye_week(schedules, team, week):
             continue
@@ -216,11 +243,18 @@ def remaining_weeks_and_matchup_adjustment(
             else None
         )
         if opp_allowed is None or league_avg is None:
-            adjustments.append(0.0)
+            matchup_adjustments.append(0.0)
         else:
-            adjustments.append(matchup_adjustment(opp_allowed, league_avg, weeks_played))
-    avg_adjustment = mean(adjustments) if adjustments else 0.0
-    return weeks, avg_adjustment
+            matchup_adjustments.append(matchup_adjustment(opp_allowed, league_avg, weeks_played))
+
+        team_spread, total_line = team_spread_and_total(schedules, team, week)
+        if team_spread is None:
+            game_script_adjustments.append(0.0)
+        else:
+            game_script_adjustments.append(game_script_adjustment(position, team_spread, total_line))
+    avg_matchup_adjustment = mean(matchup_adjustments) if matchup_adjustments else 0.0
+    avg_game_script_adjustment = mean(game_script_adjustments) if game_script_adjustments else 0.0
+    return weeks, avg_matchup_adjustment, avg_game_script_adjustment
 
 
 def weekly_fantasy_points(
@@ -286,9 +320,11 @@ def league_avg_points_allowed_through_week(
 def opportunity_shares(
     weekly_stats: pl.DataFrame, snap_counts: pl.DataFrame, player_id_map: pl.DataFrame
 ) -> pl.DataFrame:
-    """Per player/week: a position-appropriate opportunity share (target
-    share for WR/TE, carry share for RB, attempt share for QB) plus snap %,
-    joined in via the sleeper_id/gsis_id/pfr_id crosswalk."""
+    """Per player/week: a position-appropriate opportunity share (WOPR --
+    Weighted Opportunity Rating, 1.5*target_share + 0.7*air_yards_share,
+    nflverse's own precomputed volume composite -- for WR/TE, carry share
+    for RB, attempt share for QB) plus snap %, joined in via the
+    sleeper_id/gsis_id/pfr_id crosswalk."""
     team_carries = weekly_stats.group_by(["team", "week"]).agg(
         pl.col("carries").sum().alias("team_carries")
     )
@@ -303,7 +339,7 @@ def opportunity_shares(
         .then(pl.col("carries") / pl.col("team_carries"))
         .when(pl.col("position") == "QB")
         .then(pl.col("attempts") / pl.col("team_attempts"))
-        .otherwise(pl.col("target_share"))
+        .otherwise(pl.col("wopr"))
         .fill_null(0.0)
     )
 

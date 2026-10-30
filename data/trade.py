@@ -9,7 +9,7 @@ from core.trade import TradeEvaluation, evaluate_side, evaluate_trade
 from core.waiver import RosValueBreakdown
 from data.models import League, Player, Roster
 from data.projections import SKILL_POSITIONS
-from data.ros_value import RosContext, load_ros_context, player_ros_value
+from data.ros_value import RosContext, compute_vorp, load_ros_context, player_ros_value
 
 
 def _roster_positions_and_breakdowns(
@@ -30,6 +30,7 @@ def _roster_positions_and_breakdowns(
 
 def build_trade_evaluation(
     league: League,
+    rosters: list[Roster],
     my_roster: Roster,
     their_roster: Roster,
     players: dict[str, Player],
@@ -38,7 +39,7 @@ def build_trade_evaluation(
     season: str,
     week: int,
     demo: bool = False,
-) -> tuple[TradeEvaluation, dict[str, RosValueBreakdown]]:
+) -> tuple[TradeEvaluation, dict[str, RosValueBreakdown], dict[str, float]]:
     ctx = load_ros_context(league, season, week, demo=demo)
 
     my_positions, my_breakdowns = _roster_positions_and_breakdowns(my_roster, players, ctx)
@@ -72,4 +73,8 @@ def build_trade_evaluation(
         **{pid: my_breakdowns[pid] for pid in gives},
         **{pid: their_breakdowns[pid] for pid in receives},
     }
-    return evaluation, breakdowns
+
+    vorp_by_player = compute_vorp(ctx, rosters, players, league.roster_positions)
+    trade_vorp = {pid: vorp_by_player.get(pid, 0.0) for pid in set(gives) | set(receives)}
+
+    return evaluation, breakdowns, trade_vorp

@@ -27,6 +27,30 @@ REGRESSION_PULL_FRACTION = 0.5
 # clamp: caps how much a small early-season sample can swing the projection.
 REGRESSION_MAX_RATIO = 0.5
 
+# Vegas lines reflect real market expectations of how a game will be
+# played. Empirically fit, not hand-picked -- see
+# scripts/calibrate_game_script.py, which regresses each skill player's
+# weekly PPR-points deviation from their own season average against the
+# game's real spread/total across 2021-2025 (1,359 games; n=3,079-11,926
+# player-weeks per position). Findings matched the research direction: a
+# favorite protecting a lead runs more (RB-specific -- spread slope
+# correlation 0.047, n=7,434), and a higher-total game means more overall
+# scoring/passing opportunity for pass-catchers/QBs (total-line
+# correlations 0.016-0.023) but NOT meaningfully for RBs specifically
+# (correlation -0.002, indistinguishable from 0 -- zeroed out below rather
+# than keeping noise). These correlations are intentionally small/real --
+# this is a secondary nudge, not a primary signal.
+NEUTRAL_TOTAL = 44.55  # empirical mean total_line across the calibration dataset
+GAME_SCRIPT_SPREAD_CLAMP = 17.0  # observed team_spread range was -20.5..20.5; bounds extreme outlier lines
+GAME_SCRIPT_TOTAL_CLAMP = 12.0   # observed total_line range was 28.5..57.5 (neutral +-~13..16)
+GAME_SCRIPT_SPREAD_COEFFICIENT = 0.0423  # points per point of spread favor, RB only
+GAME_SCRIPT_TOTAL_COEFFICIENTS: dict[str, float] = {
+    "QB": 0.0364,
+    "RB": 0.0,  # empirically ~0 -- total doesn't move RB production the way it does the passing game
+    "WR": 0.0204,
+    "TE": 0.0228,
+}
+
 
 @dataclass
 class Projection:
@@ -108,6 +132,31 @@ def regression_adjustment(
     ratio = min(max(diff_ratio, -max_ratio), max_ratio)
     shrinkage = min(weeks_played / shrinkage_full_weeks, 1.0) if shrinkage_full_weeks > 0 else 1.0
     return -pull_fraction * ratio * baseline * shrinkage
+
+
+def game_script_adjustment(
+    position: str,
+    team_spread: float,
+    total_line: float,
+    neutral_total: float = NEUTRAL_TOTAL,
+    spread_clamp: float = GAME_SCRIPT_SPREAD_CLAMP,
+    total_clamp: float = GAME_SCRIPT_TOTAL_CLAMP,
+) -> float:
+    """Point delta from this week's real Vegas spread/total (a game-script
+    proxy) -- same calling convention as matchup_adjustment (a direct
+    points delta, not baseline-scaled), since the calibration measured a
+    direct points effect, not a ratio. `team_spread` is signed so positive
+    always means the player's own team is favored."""
+    spread_term = 0.0
+    if position == "RB":
+        clamped_spread = min(max(team_spread, -spread_clamp), spread_clamp)
+        spread_term = GAME_SCRIPT_SPREAD_COEFFICIENT * clamped_spread
+
+    total_coefficient = GAME_SCRIPT_TOTAL_COEFFICIENTS.get(position, 0.0)
+    clamped_total_delta = min(max(total_line - neutral_total, -total_clamp), total_clamp)
+    total_term = total_coefficient * clamped_total_delta
+
+    return spread_term + total_term
 
 
 def availability_multiplier(

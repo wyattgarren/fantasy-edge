@@ -2,6 +2,7 @@ from core.waiver import (
     bid_percent_range,
     need_score,
     position_age_multiplier,
+    replacement_ranks,
     ros_value,
     suggest_drop,
     trending_bonus,
@@ -111,6 +112,54 @@ def test_ros_value_per_game_floors_at_zero():
     )
     assert result.per_game == 0.0
     assert result.total == 0.0
+
+
+def test_ros_value_game_script_shifts_per_game():
+    baseline_only = ros_value([10.0] * 4, recent_share=0.3, season_share=0.3, week_weights=[1.0])
+    with_game_script = ros_value(
+        [10.0] * 4,
+        recent_share=0.3,
+        season_share=0.3,
+        week_weights=[1.0],
+        avg_game_script_adjustment=0.4,
+    )
+    assert with_game_script.per_game == baseline_only.per_game + 0.4
+
+
+def test_replacement_ranks_no_flex():
+    # 10-team league, 1 QB/2 RB/2 WR/1 TE, no FLEX/SUPER_FLEX
+    roster_positions = ["QB", "RB", "RB", "WR", "WR", "TE", "BN", "BN"]
+    ranks = replacement_ranks(roster_positions, team_count=10)
+    assert ranks == {"QB": 10, "RB": 20, "WR": 20, "TE": 10}
+
+
+def test_replacement_ranks_splits_flex_evenly():
+    # 1 FLEX (RB/WR/TE eligible) across 10 teams = 10 extra slots / 3 positions
+    roster_positions = ["QB", "RB", "WR", "TE", "FLEX"]
+    ranks = replacement_ranks(roster_positions, team_count=10)
+    extra = 10 / 3
+    assert ranks["QB"] == 10
+    assert ranks["RB"] == round(10 + extra)
+    assert ranks["WR"] == round(10 + extra)
+    assert ranks["TE"] == round(10 + extra)
+
+
+def test_replacement_ranks_splits_super_flex_evenly():
+    roster_positions = ["QB", "RB", "WR", "TE", "SUPER_FLEX"]
+    ranks = replacement_ranks(roster_positions, team_count=10)
+    extra = 10 / 4
+    assert ranks["QB"] == round(10 + extra)
+    assert ranks["RB"] == round(10 + extra)
+    assert ranks["WR"] == round(10 + extra)
+    assert ranks["TE"] == round(10 + extra)
+
+
+def test_replacement_ranks_scales_with_team_count():
+    roster_positions = ["QB", "RB", "RB", "WR", "WR", "TE"]
+    small = replacement_ranks(roster_positions, team_count=8)
+    large = replacement_ranks(roster_positions, team_count=14)
+    for position in small:
+        assert large[position] > small[position]
 
 
 def test_position_age_multiplier_rb_at_or_below_peak():

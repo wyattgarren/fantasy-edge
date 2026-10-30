@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from core.lineup import FLEX_ELIGIBLE, SUPER_FLEX_ELIGIBLE
 from core.projection import baseline_points, opportunity_adjustment
 
 TRENDING_BONUS_TIERS = [(10, 3.0), (25, 1.5)]
@@ -59,6 +60,7 @@ class RosValueBreakdown:
     opportunity: float
     regression: float
     avg_matchup_adjustment: float
+    avg_game_script_adjustment: float
     age_multiplier: float
     availability_multiplier: float
     games_weight: float
@@ -73,6 +75,7 @@ def ros_value(
     season_share: float,
     week_weights: list[float],
     avg_matchup_adjustment: float = 0.0,
+    avg_game_script_adjustment: float = 0.0,
     regression_points_per_game: float = 0.0,
     age_multiplier: float = 1.0,
     availability_multiplier: float = 1.0,
@@ -101,7 +104,13 @@ def ros_value(
     """
     baseline = baseline_points(weekly_points)
     opportunity = opportunity_adjustment(recent_share, season_share, baseline)
-    raw = baseline + opportunity + regression_points_per_game + avg_matchup_adjustment
+    raw = (
+        baseline
+        + opportunity
+        + regression_points_per_game
+        + avg_matchup_adjustment
+        + avg_game_script_adjustment
+    )
     shrinkage = min(len(weekly_points) / shrinkage_full_weeks, 1.0) if shrinkage_full_weeks > 0 else 1.0
     per_game = max(0.0, raw * shrinkage * age_multiplier)
 
@@ -117,6 +126,7 @@ def ros_value(
         "opportunity": opportunity,
         "regression": regression_points_per_game,
         "matchup_adjustment": avg_matchup_adjustment,
+        "game_script_adjustment": avg_game_script_adjustment,
         "age_multiplier": age_multiplier,
         "availability_multiplier": availability_multiplier,
         "games_weight": games_weight,
@@ -128,6 +138,7 @@ def ros_value(
         opportunity=opportunity,
         regression=regression_points_per_game,
         avg_matchup_adjustment=avg_matchup_adjustment,
+        avg_game_script_adjustment=avg_game_script_adjustment,
         age_multiplier=age_multiplier,
         availability_multiplier=availability_multiplier,
         games_weight=games_weight,
@@ -210,3 +221,46 @@ def bid_percent_range(
     low = base * (0.8 + 0.4 * competition_factor)
     high = base * (1.2 + 0.6 * competition_factor)
     return max(0.0, min(100.0, low)), max(0.0, min(100.0, high))
+
+
+SKILL_POSITIONS = ("QB", "RB", "WR", "TE")
+
+
+def replacement_ranks(roster_positions: list[str], team_count: int) -> dict[str, int]:
+    """For each skill position, the 0-indexed rank (among all skill players
+    at that position league-wide, sorted by value descending) considered
+    "replacement level" -- a bench/waiver-quality player, not a real
+    starter -- for a league of this size/roster construction. The classic
+    VORP/VBD concept (e.g. FantasyPros' value-based-drafting writeups):
+    express a player's value relative to replacement level at their own
+    position, not just their raw point total, since positional scarcity
+    varies by league (a QB means something very different in a superflex
+    league than a single-QB one).
+
+    Dedicated slots (e.g. 2 RB slots) count directly. FLEX/SUPER_FLEX
+    slots are split EVENLY across their eligible positions -- a
+    deliberate simplifying assumption (not historically-weighted by real
+    flex usage), documented the same way DEFAULT_PLAYOFF_ROUNDS/AGE_CURVES
+    elsewhere in this module are: a transparent, reasonable judgment call,
+    not a precise model.
+    """
+    dedicated_slots = dict.fromkeys(SKILL_POSITIONS, 0)
+    flex_slots = 0
+    super_flex_slots = 0
+    for slot in roster_positions:
+        if slot in dedicated_slots:
+            dedicated_slots[slot] += 1
+        elif slot == "FLEX":
+            flex_slots += 1
+        elif slot == "SUPER_FLEX":
+            super_flex_slots += 1
+
+    ranks: dict[str, int] = {}
+    for position in SKILL_POSITIONS:
+        starters = dedicated_slots[position] * team_count
+        if position in FLEX_ELIGIBLE:
+            starters += (flex_slots * team_count) / len(FLEX_ELIGIBLE)
+        if position in SUPER_FLEX_ELIGIBLE:
+            starters += (super_flex_slots * team_count) / len(SUPER_FLEX_ELIGIBLE)
+        ranks[position] = round(starters)
+    return ranks

@@ -200,6 +200,47 @@ need a larger sample to add real signal rather than noise on top of the
 baseline. Red-zone touches and K/DEF scoring are also out of scope for this
 pass (see `data/stats.py`'s module docstring).
 
+## Trade Analyzer value model
+
+The Trade Analyzer's rest-of-season value (`core/waiver.py`'s `ros_value`,
+shared with Waiver Wire) builds on the same per-game baseline above, plus:
+TD/efficiency regression against nflverse's own expected-points model,
+strength of the real remaining schedule, a positional aging-curve
+discount, injury/bye handling, and playoff-week weighting — and now:
+
+- **WOPR** (Weighted Opportunity Rating, `1.5×target_share + 0.7×air_yards_share`)
+  drives the WR/TE opportunity trend instead of raw target share — a
+  validated nflverse volume composite that's already computed in the same
+  stats table this app already loads.
+- **VORP** (Value Over Replacement Player): each traded player's value is
+  also shown relative to a replacement-level baseline at their own
+  position, computed from the connected league's actual roster
+  construction (team count, starter slots, FLEX/SUPER_FLEX eligibility) —
+  the classic value-based-drafting concept, so a QB means something
+  different in a superflex league than a single-QB one.
+- **Vegas game script**: a small, points-per-game nudge from the real
+  spread/total of each remaining game. Coefficients are **empirically
+  calibrated**, not hand-picked — `scripts/calibrate_game_script.py`
+  regresses each skill player's weekly PPR-points deviation from their own
+  season average against real historical spread/total lines across the
+  2021-2025 seasons (1,359 games; 3,079-11,926 player-weeks per position):
+
+  | Position | Spread slope (RB-only) | Total slope | Correlation (spread / total) |
+  |---|---|---|---|
+  | QB | — | +0.0364 | — / 0.023 |
+  | RB | +0.0423 | 0.0 (noise) | 0.047 / -0.002 |
+  | WR | — | +0.0204 | — / 0.016 |
+  | TE | — | +0.0228 | — / 0.021 |
+
+  This matches the research direction (favorites run more; a higher total
+  means more scoring opportunity for the passing game) — and confirms total
+  doesn't meaningfully move RB production the way it does the passing
+  game, so that coefficient is zeroed out rather than kept as noise. These
+  correlations are intentionally small: this is a secondary nudge, not a
+  primary signal.
+- **Trade-deadline awareness**: the Trade Analyzer surfaces the league's
+  real trade deadline and warns if it's already passed.
+
 ## Screenshots
 
 *(TODO: add screenshots/GIF of the My Team, Start/Sit, and Matchup Simulator

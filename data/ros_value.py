@@ -14,8 +14,15 @@ import polars as pl
 
 import data.stats as stats
 from core.projection import availability_multiplier, baseline_points, regression_adjustment
-from core.waiver import DEFAULT_PLAYOFF_ROUNDS, RosValueBreakdown, position_age_multiplier, ros_value
-from data.models import League, Player
+from core.waiver import (
+    DEFAULT_PLAYOFF_ROUNDS,
+    SKILL_POSITIONS,
+    RosValueBreakdown,
+    position_age_multiplier,
+    replacement_ranks,
+    ros_value,
+)
+from data.models import League, Player, Roster
 
 
 @dataclass
@@ -83,11 +90,12 @@ def player_ros_value(ctx: RosContext, player: Player, player_id: str) -> RosValu
     if team is None:
         week_weights: list[float] = []
         avg_matchup_adjustment = 0.0
+        avg_game_script_adjustment = 0.0
     else:
         week_weights = stats.remaining_week_weights(
             ctx.schedules, team, ctx.week, ctx.last_fantasy_week, ctx.playoff_week_start
         )
-        _, avg_matchup_adjustment = stats.remaining_weeks_and_matchup_adjustment(
+        _, avg_matchup_adjustment, avg_game_script_adjustment = stats.remaining_weeks_and_schedule_adjustments(
             ctx.schedules,
             ctx.points_allowed,
             team,
@@ -116,7 +124,44 @@ def player_ros_value(ctx: RosContext, player: Player, player_id: str) -> RosValu
         season_share=season_share,
         week_weights=week_weights,
         avg_matchup_adjustment=avg_matchup_adjustment,
+        avg_game_script_adjustment=avg_game_script_adjustment,
         regression_points_per_game=regression_points_per_game,
         age_multiplier=age_mult,
         availability_multiplier=availability,
     )
+
+
+def compute_vorp(
+    ctx: RosContext, rosters: list[Roster], players: dict[str, Player], roster_positions: list[str]
+) -> dict[str, float]:
+    """VORP (Value Over Replacement Player) for every rostered skill-position
+    player league-wide: that player's ros_value total minus the
+    replacement-level total at their own position (see
+    core.waiver.replacement_ranks), ranked among all rostered skill players
+    in the league. A second, parallel lens on trade value -- not baked into
+    core/trade.py's verdict, which stays untouched and only ever compares
+    the two sides' own raw totals."""
+    totals_by_position: dict[str, list[tuple[str, float]]] = {pos: [] for pos in SKILL_POSITIONS}
+    for roster in rosters:
+        for player_id in roster.players:
+            player = players.get(player_id)
+            if player is None or player.position not in SKILL_POSITIONS:
+                continue
+            total = player_ros_value(ctx, player, player_id).total
+            totals_by_position[player.position].append((player_id, total))
+
+    ranks = replacement_ranks(roster_positions, len(rosters))
+    replacement_value: dict[str, float] = {}
+    for position, entries in totals_by_position.items():
+        values = sorted((total for _, total in entries), reverse=True)
+        if not values:
+            replacement_value[position] = 0.0
+            continue
+        index = min(ranks.get(position, 0), len(values) - 1)
+        replacement_value[position] = values[index]
+
+    vorp_by_player: dict[str, float] = {}
+    for position, entries in totals_by_position.items():
+        for player_id, total in entries:
+            vorp_by_player[player_id] = total - replacement_value[position]
+    return vorp_by_player

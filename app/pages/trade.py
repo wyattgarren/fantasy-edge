@@ -37,6 +37,13 @@ if my_roster is None:
 
 page_caption(league.name, league.season, nfl_state.week)
 
+trade_deadline = league.settings.get("trade_deadline")
+if trade_deadline:
+    if nfl_state.week >= int(trade_deadline):
+        st.warning(f"The trade deadline (week {int(trade_deadline)}) has passed.")
+    else:
+        st.caption(f"Trade deadline: week {int(trade_deadline)}.")
+
 names_by_user_id = {u.user_id: (u.display_name or u.user_id) for u in league_users}
 
 
@@ -79,8 +86,9 @@ if not gives or not receives:
     st.stop()
 
 with st.spinner("Evaluating trade from real rest-of-season values..."):
-    evaluation, breakdowns = build_trade_evaluation(
+    evaluation, breakdowns, vorp = build_trade_evaluation(
         league,
+        rosters,
         my_roster,
         their_roster,
         players,
@@ -95,11 +103,15 @@ st.subheader("Verdict")
 verdict_box = {"Accept": st.success, "Decline": st.error, "Counter": st.warning}[evaluation.verdict]
 verdict_box(explain(f"**{evaluation.verdict}** — {evaluation.reason}"))
 
+my_vorp_change = sum(vorp.get(pid, 0.0) for pid in receives) - sum(vorp.get(pid, 0.0) for pid in gives)
+their_vorp_change = -my_vorp_change
+
 st.subheader("Before / after")
 rows = [
     {
         "Side": "You",
         "ROS value change": f"{evaluation.my_result.value_change:+.1f}",
+        "VORP change": f"{my_vorp_change:+.1f}",
         "Lineup before": f"{evaluation.my_result.lineup_value_before:.1f}",
         "Lineup after": f"{evaluation.my_result.lineup_value_after:.1f}",
         "Lineup change": f"{evaluation.my_result.lineup_value_change:+.1f}",
@@ -107,22 +119,29 @@ rows = [
     {
         "Side": partner_labels[partner_roster_id],
         "ROS value change": f"{evaluation.their_result.value_change:+.1f}",
+        "VORP change": f"{their_vorp_change:+.1f}",
         "Lineup before": f"{evaluation.their_result.lineup_value_before:.1f}",
         "Lineup after": f"{evaluation.their_result.lineup_value_after:.1f}",
         "Lineup change": f"{evaluation.their_result.lineup_value_change:+.1f}",
     },
 ]
 st.dataframe(rows, hide_index=True)
+st.caption(
+    "VORP change: positional-scarcity-adjusted value swing -- positive means you're gaining more "
+    "surplus over a replacement-level player at that position than you're giving up."
+)
 
 FACTOR_LABELS: dict[str, str] = {
     "baseline": "Recent scoring",
     "opportunity": "Role trend",
     "regression": "TD luck adjustment",
     "matchup_adjustment": "Schedule strength",
+    "game_script_adjustment": "Vegas game script",
     "age_multiplier": "Age factor",
     "availability_multiplier": "Health status",
     "per_game": "Projected per game",
     "games_weight": "Weighted games left",
+    "vorp": "Positional value (VORP)",
 }
 
 FACTOR_EXPLANATIONS: dict[str, str] = {
@@ -133,6 +152,10 @@ FACTOR_EXPLANATIONS: dict[str, str] = {
         "correcting for touchdown or big-play luck that tends to even out over time."
     ),
     "matchup_adjustment": "How tough their remaining opponents are, on average, compared to a typical schedule.",
+    "game_script_adjustment": (
+        "A small, data-calibrated nudge from real Vegas point spreads and totals -- favorites tend "
+        "to run more, and higher-scoring games mean more opportunity for everyone."
+    ),
     "age_multiplier": "A discount for players at an age when their position historically starts to decline.",
     "availability_multiplier": (
         "A discount applied only to their very next game if they're currently banged up, "
@@ -140,6 +163,11 @@ FACTOR_EXPLANATIONS: dict[str, str] = {
     ),
     "per_game": "The final per-game rate after combining all the factors above.",
     "games_weight": "How many games remain this season, with byes removed and the fantasy playoffs counted extra.",
+    "vorp": (
+        "Value over a replacement-level player at the same position in a league this size -- "
+        "a QB means something very different in a 1-QB league than a superflex one, and this "
+        "accounts for that instead of just comparing raw point totals."
+    ),
 }
 
 st.subheader("Why")
@@ -179,10 +207,12 @@ def render_breakdown(column, player_id: str) -> None:
         ("Role trend", f"{breakdown.opportunity:+.1f} pts/gm"),
         ("TD luck adjustment", f"{breakdown.regression:+.1f} pts/gm"),
         ("Schedule strength", f"{breakdown.avg_matchup_adjustment:+.1f} pts/gm"),
+        ("Vegas game script", f"{breakdown.avg_game_script_adjustment:+.1f} pts/gm"),
         ("Age factor", f"{breakdown.age_multiplier:.0%}"),
         ("Health status", f"{breakdown.availability_multiplier:.0%} ({status})"),
         ("Projected per game", f"{breakdown.per_game:.1f} pts/gm"),
         ("Weighted games left", f"{breakdown.games_weight:.1f} games"),
+        ("Positional value (VORP)", f"{vorp.get(player_id, 0.0):+.1f} pts"),
     ]
     column.table({"Factor": [r[0] for r in rows], "Value": [r[1] for r in rows]})
 

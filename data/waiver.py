@@ -45,14 +45,18 @@ def _upcoming_byes(schedules, team: str, week: int, window: int) -> int:
     return sum(1 for w in range(week, week + window) if stats.is_bye_week(schedules, team, w))
 
 
-def _roster_need_by_position(
-    roster: Roster,
+def roster_need_by_position(
+    player_ids: list[str],
     players: dict[str, Player],
     roster_ros: dict[str, float],
     roster_positions: list[str],
     schedules,
     week: int,
 ) -> dict[str, NeedBreakdown]:
+    """`player_ids` is any list of rostered-skill-position player ids --
+    a real roster's `.players`, or a hypothetical post-trade player set
+    (see data/trade.py's handcuff-risk check), not necessarily a real
+    Roster object."""
     required_by_position: dict[str, int] = {}
     for pos in roster_positions:
         if pos in SKILL_POSITIONS:
@@ -60,7 +64,7 @@ def _roster_need_by_position(
 
     healthy_by_position = dict.fromkeys(required_by_position, 0)
     byes_by_position = dict.fromkeys(required_by_position, 0)
-    for pid in roster.players:
+    for pid in player_ids:
         player = players.get(pid)
         if player is None or player.position not in required_by_position:
             continue
@@ -108,8 +112,8 @@ def build_waiver_board(
 
     free_agent_ros = {pid: player_ros_value(ctx, players[pid], pid).total for pid in candidate_ids}
     my_roster_ros = roster_ros_values(my_roster)
-    my_need = _roster_need_by_position(
-        my_roster, players, my_roster_ros, league.roster_positions, schedules, week
+    my_need = roster_need_by_position(
+        my_roster.players, players, my_roster_ros, league.roster_positions, schedules, week
     )
 
     # how many OTHER teams show need at each position -> FAAB competition factor
@@ -117,8 +121,8 @@ def build_waiver_board(
     for roster in rosters:
         if roster.roster_id == my_roster.roster_id:
             continue
-        need = _roster_need_by_position(
-            roster, players, roster_ros_values(roster), league.roster_positions, schedules, week
+        need = roster_need_by_position(
+            roster.players, players, roster_ros_values(roster), league.roster_positions, schedules, week
         )
         for pos, breakdown in need.items():
             if breakdown.score > 0:

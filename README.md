@@ -240,6 +240,26 @@ discount, injury/bye handling, and playoff-week weighting — and now:
   primary signal.
 - **Trade-deadline awareness**: the Trade Analyzer surfaces the league's
   real trade deadline and warns if it's already passed.
+- **Richer injury signal**: nflverse's real weekly practice-participation
+  report (`nfl.load_injuries`) layers a further discount on top of
+  Sleeper's own injury tag — a player officially "Questionable" who Did
+  Not Participate in practice is a bigger risk than one who went Full.
+- **Red zone role trend**: a player's trending share of their *team's*
+  red-zone carries/targets (`nfl.load_pbp`, the only source with a
+  red-zone split) — structurally identical to the existing Role trend,
+  just scoped to high-value touches, with extra shrinkage since
+  team-level red-zone sample sizes can be as small as 1 in early weeks
+  (confirmed against real 2025 data).
+- **Positional depth / handcuff risk**: the Trade Analyzer warns when a
+  trade would leave either side short a healthy starter at some position
+  (e.g. "You'd be short at RB after this trade (1 healthy for 2 slots)."),
+  a second, informational lens alongside the accept/decline/counter
+  verdict rather than baked into it.
+- **Depth-chart display**: each traded player's Sleeper depth-chart slot
+  (e.g. "RB1", "WR2 (slot)") is shown for context — informational only,
+  not scored, since a single current-snapshot depth rank with no history
+  can't really show a *trend*, and a backup's low value is already
+  captured by their own thin production history.
 
 ## Screenshots
 

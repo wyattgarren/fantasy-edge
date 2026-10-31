@@ -161,6 +161,107 @@ def load_player_ages(demo: bool = False) -> pl.DataFrame:
     )
 
 
+def load_injuries(season: str, demo: bool = False) -> pl.DataFrame:
+    """The real weekly NFL injury report (gsis_id, week, report_status,
+    practice_status, ...) -- richer than Sleeper's single current-snapshot
+    injury_status string, since practice_status reflects the week's actual
+    participation level. One row per (gsis_id, week) for current-season
+    data (confirmed live, no dedupe needed here)."""
+    if demo:
+        return pl.read_parquet(DEMO_DATA_DIR / "injuries.parquet")
+    return nfl.load_injuries(seasons=[int(season)])
+
+
+def practice_status_for_week(injuries: pl.DataFrame, gsis_id: str | None, week: int) -> str | None:
+    """This player's practice-participation report for `week`, or None if
+    there's no report (healthy, not on the injury list) or no gsis_id."""
+    if gsis_id is None:
+        return None
+    rows = injuries.filter((pl.col("gsis_id") == gsis_id) & (pl.col("week") == week))
+    if rows.height == 0:
+        return None
+    return rows["practice_status"][0]
+
+
+def load_red_zone_shares(season: str, demo: bool = False) -> pl.DataFrame:
+    """Per player/week (gsis_id-keyed): their share of the TEAM's red-zone
+    (yardline_100<=20) carries and, separately, targets -- a leading,
+    volume-based TD-upside signal play-by-play is the only source for
+    (no season-aggregate table exposes a red-zone split). Raw loader only
+    -- red_zone_opportunity_shares() does the position-based routing
+    (RB->carry share, WR/TE->target share) and sleeper_id mapping, mirroring
+    how load_weekly_stats/load_snap_counts feed opportunity_shares()."""
+    if demo:
+        return pl.read_parquet(DEMO_DATA_DIR / "red_zone_shares.parquet")
+
+    pbp = nfl.load_pbp(seasons=[int(season)]).with_columns(pl.col("week").cast(pl.Int32))
+    base = pbp.filter(
+        (pl.col("season_type") == "REG")
+        & pl.col("play_type").is_in(["run", "pass"])
+        & (pl.col("two_point_attempt") != 1)
+    )
+    base = _fix_team_codes(base, "posteam")
+    rz = base.filter(pl.col("yardline_100") <= 20)
+
+    rz_rush = rz.filter((pl.col("play_type") == "run") & pl.col("rusher_player_id").is_not_null())
+    rz_pass = rz.filter((pl.col("play_type") == "pass") & pl.col("receiver_player_id").is_not_null())
+
+    team_rz_carries = rz_rush.group_by(["posteam", "week"]).agg(pl.len().alias("team_rz_carries"))
+    carry_shares = (
+        rz_rush.group_by(["posteam", "week", "rusher_player_id"])
+        .agg(pl.len().alias("rz_carries"))
+        .join(team_rz_carries, on=["posteam", "week"])
+        .with_columns((pl.col("rz_carries") / pl.col("team_rz_carries")).alias("rz_carry_share"))
+        .select(pl.col("rusher_player_id").alias("gsis_id"), "week", "rz_carry_share")
+    )
+
+    team_rz_targets = rz_pass.group_by(["posteam", "week"]).agg(pl.len().alias("team_rz_targets"))
+    target_shares = (
+        rz_pass.group_by(["posteam", "week", "receiver_player_id"])
+        .agg(pl.len().alias("rz_targets"))
+        .join(team_rz_targets, on=["posteam", "week"])
+        .with_columns((pl.col("rz_targets") / pl.col("team_rz_targets")).alias("rz_target_share"))
+        .select(pl.col("receiver_player_id").alias("gsis_id"), "week", "rz_target_share")
+    )
+
+    return (
+        carry_shares.join(target_shares, on=["gsis_id", "week"], how="full", coalesce=True)
+        .fill_null(0.0)
+        .with_columns(pl.col("week").cast(pl.Int32))
+    )
+
+
+def red_zone_opportunity_shares(
+    red_zone_shares: pl.DataFrame, weekly_stats: pl.DataFrame, player_id_map: pl.DataFrame
+) -> pl.DataFrame:
+    """Position-routes load_red_zone_shares()'s raw carry/target shares
+    (RB -> red-zone carry share, WR/TE -> red-zone target share; no QB
+    rows -- red-zone rushing/receiving touches are the signal, not
+    red-zone pass attempts) and maps gsis_id -> sleeper_id, producing the
+    same (sleeper_id, week, opportunity_share) shape opportunity_shares()
+    already does, so it drops directly into
+    player_weekly_points_and_shares()."""
+    positions = weekly_stats.select(["player_id", "week", "position"]).unique(
+        subset=["player_id", "week"]
+    )
+    merged = positions.join(
+        red_zone_shares.rename({"gsis_id": "player_id"}), on=["player_id", "week"], how="left"
+    ).with_columns(
+        opportunity_share=pl.when(pl.col("position") == "RB")
+        .then(pl.col("rz_carry_share"))
+        .when(pl.col("position").is_in(["WR", "TE"]))
+        .then(pl.col("rz_target_share"))
+        .otherwise(None)
+        .fill_null(0.0)
+    )
+    merged = merged.filter(pl.col("position").is_in(["RB", "WR", "TE"]))
+
+    ids = player_id_map.select(["sleeper_id", "gsis_id"])
+    return merged.join(ids, left_on="player_id", right_on="gsis_id", how="inner").select(
+        ["sleeper_id", "week", "opportunity_share"]
+    )
+
+
 def expected_points_diff_ratio(
     expected_points: pl.DataFrame, gsis_id: str | None, before_week: int
 ) -> float | None:

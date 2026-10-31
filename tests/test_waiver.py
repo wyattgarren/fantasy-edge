@@ -126,6 +126,18 @@ def test_ros_value_game_script_shifts_per_game():
     assert with_game_script.per_game == baseline_only.per_game + 0.4
 
 
+def test_ros_value_red_zone_adjustment_shifts_per_game():
+    baseline_only = ros_value([10.0] * 4, recent_share=0.3, season_share=0.3, week_weights=[1.0])
+    with_red_zone = ros_value(
+        [10.0] * 4,
+        recent_share=0.3,
+        season_share=0.3,
+        week_weights=[1.0],
+        red_zone_adjustment=0.6,
+    )
+    assert with_red_zone.per_game == baseline_only.per_game + 0.6
+
+
 def test_replacement_ranks_no_flex():
     # 10-team league, 1 QB/2 RB/2 WR/1 TE, no FLEX/SUPER_FLEX
     roster_positions = ["QB", "RB", "RB", "WR", "WR", "TE", "BN", "BN"]

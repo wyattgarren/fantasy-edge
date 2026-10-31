@@ -7,7 +7,9 @@ from core.projection import (
     game_script_adjustment,
     matchup_adjustment,
     opportunity_adjustment,
+    practice_participation_adjustment,
     project_player,
+    red_zone_adjustment,
     regression_adjustment,
 )
 
@@ -109,6 +111,46 @@ def test_game_script_adjustment_clamps_extreme_total():
 
 def test_game_script_adjustment_unknown_position_is_zero():
     assert game_script_adjustment("K", team_spread=10.0, total_line=NEUTRAL_TOTAL + 10.0) == 0.0
+
+
+def test_practice_participation_adjustment_no_report_is_full_trust():
+    assert practice_participation_adjustment(None) == 1.0
+
+
+def test_practice_participation_adjustment_full_participation():
+    assert practice_participation_adjustment("Full Participation in Practice") == 1.0
+
+
+def test_practice_participation_adjustment_limited():
+    assert practice_participation_adjustment("Limited Participation in Practice") == 0.9
+
+
+def test_practice_participation_adjustment_dnp():
+    assert practice_participation_adjustment("Did Not Participate In Practice") == 0.75
+
+
+def test_practice_participation_adjustment_matches_by_substring_case_insensitive():
+    # real nflreadpy values vary in capitalization/wording -- substring match, not exact
+    assert practice_participation_adjustment("did not participate in practice") == 0.75
+
+
+def test_red_zone_adjustment_matches_opportunity_adjustment_at_full_shrinkage():
+    # at weeks_played >= shrinkage_full_weeks, red_zone_adjustment should
+    # exactly reproduce the reused opportunity_adjustment math
+    recent_share, season_share, baseline = 0.3, 0.2, 20.0
+    expected = opportunity_adjustment(recent_share, season_share, baseline)
+    assert red_zone_adjustment(recent_share, season_share, baseline, weeks_played=8) == expected
+
+
+def test_red_zone_adjustment_shrinks_early_season():
+    recent_share, season_share, baseline = 0.3, 0.2, 20.0
+    full = red_zone_adjustment(recent_share, season_share, baseline, weeks_played=8)
+    partial = red_zone_adjustment(recent_share, season_share, baseline, weeks_played=2)
+    assert partial == full * 0.5  # weeks_played=2 / shrinkage_full_weeks=4
+
+
+def test_red_zone_adjustment_zero_weeks_played_is_zero():
+    assert red_zone_adjustment(0.3, 0.2, baseline=20.0, weeks_played=0) == 0.0
 
 
 def test_availability_multiplier_active():

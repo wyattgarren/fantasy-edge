@@ -61,6 +61,7 @@ class RosValueBreakdown:
     regression: float
     avg_matchup_adjustment: float
     avg_game_script_adjustment: float
+    red_zone_adjustment: float
     age_multiplier: float
     availability_multiplier: float
     games_weight: float
@@ -76,6 +77,7 @@ def ros_value(
     week_weights: list[float],
     avg_matchup_adjustment: float = 0.0,
     avg_game_script_adjustment: float = 0.0,
+    red_zone_adjustment: float = 0.0,
     regression_points_per_game: float = 0.0,
     age_multiplier: float = 1.0,
     availability_multiplier: float = 1.0,
@@ -110,6 +112,7 @@ def ros_value(
         + regression_points_per_game
         + avg_matchup_adjustment
         + avg_game_script_adjustment
+        + red_zone_adjustment
     )
     shrinkage = min(len(weekly_points) / shrinkage_full_weeks, 1.0) if shrinkage_full_weeks > 0 else 1.0
     per_game = max(0.0, raw * shrinkage * age_multiplier)
@@ -127,6 +130,7 @@ def ros_value(
         "regression": regression_points_per_game,
         "matchup_adjustment": avg_matchup_adjustment,
         "game_script_adjustment": avg_game_script_adjustment,
+        "red_zone_adjustment": red_zone_adjustment,
         "age_multiplier": age_multiplier,
         "availability_multiplier": availability_multiplier,
         "games_weight": games_weight,
@@ -139,6 +143,7 @@ def ros_value(
         regression=regression_points_per_game,
         avg_matchup_adjustment=avg_matchup_adjustment,
         avg_game_script_adjustment=avg_game_script_adjustment,
+        red_zone_adjustment=red_zone_adjustment,
         age_multiplier=age_multiplier,
         availability_multiplier=availability_multiplier,
         games_weight=games_weight,
@@ -153,12 +158,20 @@ class NeedBreakdown:
     deficit: int
     upcoming_byes: int
     score: float
+    required_starters: int = 0
+    healthy_count: int = 0
 
 
 def need_score(required_starters: int, healthy_count: int, upcoming_byes: int) -> NeedBreakdown:
     deficit = max(0, required_starters - healthy_count)
     score = deficit * 10.0 + upcoming_byes * 2.0
-    return NeedBreakdown(deficit=deficit, upcoming_byes=upcoming_byes, score=score)
+    return NeedBreakdown(
+        deficit=deficit,
+        upcoming_byes=upcoming_byes,
+        score=score,
+        required_starters=required_starters,
+        healthy_count=healthy_count,
+    )
 
 
 def trending_bonus(rank: int | None) -> float:

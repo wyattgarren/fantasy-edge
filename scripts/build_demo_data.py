@@ -68,6 +68,8 @@ def main() -> None:
     schedules = stats.load_schedules(SEASON)
     expected_points = stats.load_expected_points(SEASON)
     player_ages = stats.load_player_ages()
+    injuries = stats.load_injuries(SEASON)
+    red_zone_shares = stats.load_red_zone_shares(SEASON)
 
     sleeper_to_gsis = dict(zip(id_map["sleeper_id"].to_list(), id_map["gsis_id"].to_list()))
     played_gsis_ids = set(weekly_stats["player_id"].unique().to_list())
@@ -139,6 +141,12 @@ def main() -> None:
     )
     player_ages.filter(player_ages["sleeper_id"].is_in(list(demo_player_ids))).write_parquet(
         STATS_DIR / "player_ages.parquet"
+    )
+    injuries.filter(injuries["gsis_id"].is_in(list(demo_gsis_ids))).write_parquet(
+        STATS_DIR / "injuries.parquet"
+    )
+    red_zone_shares.filter(red_zone_shares["gsis_id"].is_in(list(demo_gsis_ids))).write_parquet(
+        STATS_DIR / "red_zone_shares.parquet"
     )
     print(f"wrote {STATS_DIR.relative_to(REPO_ROOT)}/*.parquet")
 

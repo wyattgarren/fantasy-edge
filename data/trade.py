@@ -10,6 +10,7 @@ from core.waiver import RosValueBreakdown
 from data.models import League, Player, Roster
 from data.projections import SKILL_POSITIONS
 from data.ros_value import RosContext, compute_vorp, load_ros_context, player_ros_value
+from data.waiver import roster_need_by_position
 
 
 def _roster_positions_and_breakdowns(
@@ -28,6 +29,36 @@ def _roster_positions_and_breakdowns(
     return positions, breakdowns
 
 
+def _handcuff_warnings(
+    roster_positions: list[str],
+    players: dict[str, Player],
+    pre_trade_ros: dict[str, float],
+    post_trade_ros: dict[str, float],
+    schedules,
+    week: int,
+) -> list[str]:
+    """Positions where this trade pushes the roster from fine to short a
+    healthy starter -- a second, informational lens alongside the lineup-
+    value verdict, not baked into it. Only flags positions whose deficit
+    INCREASES; a side that was already short somewhere doesn't get a new
+    warning every time for a pre-existing problem this trade didn't cause."""
+    pre_need = roster_need_by_position(
+        list(pre_trade_ros), players, pre_trade_ros, roster_positions, schedules, week
+    )
+    post_need = roster_need_by_position(
+        list(post_trade_ros), players, post_trade_ros, roster_positions, schedules, week
+    )
+    warnings: list[str] = []
+    for position, post in post_need.items():
+        pre_deficit = pre_need[position].deficit if position in pre_need else 0
+        if post.deficit > pre_deficit:
+            warnings.append(
+                f"short at {position} after this trade "
+                f"({post.healthy_count} healthy for {post.required_starters} slots)"
+            )
+    return warnings
+
+
 def build_trade_evaluation(
     league: League,
     rosters: list[Roster],
@@ -39,7 +70,7 @@ def build_trade_evaluation(
     season: str,
     week: int,
     demo: bool = False,
-) -> tuple[TradeEvaluation, dict[str, RosValueBreakdown], dict[str, float]]:
+) -> tuple[TradeEvaluation, dict[str, RosValueBreakdown], dict[str, float], dict[str, list[str]]]:
     ctx = load_ros_context(league, season, week, demo=demo)
 
     my_positions, my_breakdowns = _roster_positions_and_breakdowns(my_roster, players, ctx)
@@ -77,4 +108,18 @@ def build_trade_evaluation(
     vorp_by_player = compute_vorp(ctx, rosters, players, league.roster_positions)
     trade_vorp = {pid: vorp_by_player.get(pid, 0.0) for pid in set(gives) | set(receives)}
 
-    return evaluation, breakdowns, trade_vorp
+    my_post_trade_ros = {pid: v for pid, v in my_values.items() if pid not in gives}
+    my_post_trade_ros.update({pid: their_values[pid] for pid in receives})
+    their_post_trade_ros = {pid: v for pid, v in their_values.items() if pid not in receives}
+    their_post_trade_ros.update({pid: my_values[pid] for pid in gives})
+
+    handcuff_warnings = {
+        "you": _handcuff_warnings(
+            league.roster_positions, players, my_values, my_post_trade_ros, ctx.schedules, week
+        ),
+        "them": _handcuff_warnings(
+            league.roster_positions, players, their_values, their_post_trade_ros, ctx.schedules, week
+        ),
+    }
+
+    return evaluation, breakdowns, trade_vorp, handcuff_warnings

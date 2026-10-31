@@ -46,3 +46,17 @@ def test_load_player_ages_demo_is_offline_and_nonempty() -> None:
 
     assert df.height > 0
     assert {"sleeper_id", "age", "position"}.issubset(df.columns)
+
+
+def test_load_injuries_demo_is_offline_and_nonempty() -> None:
+    df = stats.load_injuries("2026", demo=True)
+
+    assert df.height > 0
+    assert {"gsis_id", "week", "report_status", "practice_status"}.issubset(df.columns)
+
+
+def test_load_red_zone_shares_demo_is_offline_and_nonempty() -> None:
+    df = stats.load_red_zone_shares("2026", demo=True)
+
+    assert df.height > 0
+    assert {"gsis_id", "week", "rz_carry_share", "rz_target_share"}.issubset(df.columns)

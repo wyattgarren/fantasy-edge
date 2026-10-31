@@ -13,7 +13,13 @@ from dataclasses import dataclass
 import polars as pl
 
 import data.stats as stats
-from core.projection import availability_multiplier, baseline_points, regression_adjustment
+from core.projection import (
+    availability_multiplier,
+    baseline_points,
+    practice_participation_adjustment,
+    red_zone_adjustment,
+    regression_adjustment,
+)
 from core.waiver import (
     DEFAULT_PLAYOFF_ROUNDS,
     SKILL_POSITIONS,
@@ -32,6 +38,8 @@ class RosContext:
     opportunity: pl.DataFrame
     schedules: pl.DataFrame
     expected_points: pl.DataFrame
+    injuries: pl.DataFrame
+    red_zone_shares: pl.DataFrame
     player_ages: dict[str, float]
     sleeper_to_gsis: dict[str, str | None]
     week: int
@@ -49,6 +57,9 @@ def load_ros_context(league: League, season: str, week: int, demo: bool = False)
     schedules = stats.load_schedules(season, demo=demo)
     expected_points = stats.load_expected_points(season, demo=demo)
     player_ages_df = stats.load_player_ages(demo=demo)
+    injuries = stats.load_injuries(season, demo=demo)
+    red_zone_shares_raw = stats.load_red_zone_shares(season, demo=demo)
+    red_zone_shares = stats.red_zone_opportunity_shares(red_zone_shares_raw, weekly_stats, id_map)
 
     sleeper_to_gsis = dict(zip(id_map["sleeper_id"].to_list(), id_map["gsis_id"].to_list()))
     player_ages = dict(
@@ -67,6 +78,8 @@ def load_ros_context(league: League, season: str, week: int, demo: bool = False)
         opportunity=opportunity,
         schedules=schedules,
         expected_points=expected_points,
+        injuries=injuries,
+        red_zone_shares=red_zone_shares,
         player_ages=player_ages,
         sleeper_to_gsis=sleeper_to_gsis,
         week=week,
@@ -106,23 +119,35 @@ def player_ros_value(ctx: RosContext, player: Player, player_id: str) -> RosValu
             ctx.week,
         )
 
+    baseline = baseline_points(weekly_points_list)
+
     gsis_id = ctx.sleeper_to_gsis.get(player_id)
     diff_ratio = stats.expected_points_diff_ratio(ctx.expected_points, gsis_id, ctx.week)
     regression_points_per_game = 0.0
     if diff_ratio is not None:
-        baseline = baseline_points(weekly_points_list)
         regression_points_per_game = regression_adjustment(diff_ratio, baseline, weeks_played)
+
+    _, rz_recent_share, rz_season_share = stats.player_weekly_points_and_shares(
+        player_id, ctx.weekly_points, ctx.red_zone_shares, ctx.sleeper_to_gsis, ctx.week
+    )
+    red_zone_points_per_game = red_zone_adjustment(
+        rz_recent_share, rz_season_share, baseline, weeks_played
+    )
 
     age = ctx.player_ages.get(player_id)
     age_mult = position_age_multiplier(player.position, age)
 
-    availability = availability_multiplier(player.injury_status)
+    practice_status = stats.practice_status_for_week(ctx.injuries, gsis_id, ctx.week)
+    availability = availability_multiplier(player.injury_status) * practice_participation_adjustment(
+        practice_status
+    )
 
     return ros_value(
         weekly_points=weekly_points_list,
         recent_share=recent_share,
         season_share=season_share,
         week_weights=week_weights,
+        red_zone_adjustment=red_zone_points_per_game,
         avg_matchup_adjustment=avg_matchup_adjustment,
         avg_game_script_adjustment=avg_game_script_adjustment,
         regression_points_per_game=regression_points_per_game,

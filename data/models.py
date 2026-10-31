@@ -92,6 +92,11 @@ class Player(BaseModel):
     status: str | None = None
     injury_status: str | None = None
     number: int | None = None
+    depth_chart_order: int | None = None
+    # Sleeper encodes WR sub-slots as "LWR"/"RWR"/"SWR" (left/right/slot),
+    # never the literal "WR" -- display-only, so left as-is rather than
+    # normalized (see app/pages/trade.py).
+    depth_chart_position: str | None = None
 
 
 class TrendingPlayer(BaseModel):

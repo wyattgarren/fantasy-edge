@@ -177,6 +177,55 @@ def availability_multiplier(
     return 1.0
 
 
+def practice_participation_adjustment(
+    practice_status: str | None,
+    dnp_discount: float = 0.75,
+    limited_discount: float = 0.9,
+) -> float:
+    """A FURTHER discount from this week's real practice-participation
+    report (nfl.load_injuries' practice_status), layered on top of --
+    not replacing -- availability_multiplier's official-designation-based
+    discount: one more real data point on the same current-week-only
+    signal, not a second independent one. 1.0 (no change) when there's no
+    report at all (healthy, not on the injury list).
+
+    Real practice_status values are full phrases ("Full Participation in
+    Practice", "Limited Participation in Practice", "Did Not Participate
+    In Practice") -- matched by substring, not exact equality.
+    """
+    if practice_status is None:
+        return 1.0
+    normalized = practice_status.strip().lower()
+    if "did not participate" in normalized:
+        return dnp_discount
+    if "limited" in normalized:
+        return limited_discount
+    return 1.0
+
+
+def red_zone_adjustment(
+    recent_share: float,
+    season_share: float,
+    baseline: float,
+    weeks_played: int,
+    shrinkage_full_weeks: int = 4,
+    min_ratio: float = 0.7,
+    max_ratio: float = 1.3,
+) -> float:
+    """Point delta from a trending share of the TEAM's high-value
+    (red-zone) touches -- structurally identical to opportunity_adjustment
+    (reused directly: same clamped recent-vs-season ratio applied to
+    baseline), but for red-zone carries/targets specifically. ADDITIONALLY
+    shrunk toward 0 by weeks_played: unlike overall touch shares (sampled
+    from week 1), a team's red-zone-touch count in any given week can be
+    as low as 1 (confirmed against real 2025 data), making early-season
+    red-zone shares extremely noisy regardless of a player's real role.
+    """
+    raw = opportunity_adjustment(recent_share, season_share, baseline, min_ratio, max_ratio)
+    shrinkage = min(weeks_played / shrinkage_full_weeks, 1.0) if shrinkage_full_weeks > 0 else 1.0
+    return raw * shrinkage
+
+
 def project_player(
     weekly_points: list[float],
     recent_share: float,

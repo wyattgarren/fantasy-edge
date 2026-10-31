@@ -86,7 +86,7 @@ if not gives or not receives:
     st.stop()
 
 with st.spinner("Evaluating trade from real rest-of-season values..."):
-    evaluation, breakdowns, vorp = build_trade_evaluation(
+    evaluation, breakdowns, vorp, handcuff_warnings = build_trade_evaluation(
         league,
         rosters,
         my_roster,
@@ -102,6 +102,11 @@ with st.spinner("Evaluating trade from real rest-of-season values..."):
 st.subheader("Verdict")
 verdict_box = {"Accept": st.success, "Decline": st.error, "Counter": st.warning}[evaluation.verdict]
 verdict_box(explain(f"**{evaluation.verdict}** — {evaluation.reason}"))
+
+for warning in handcuff_warnings.get("you", []):
+    st.warning(f"You'd be {warning}.")
+for warning in handcuff_warnings.get("them", []):
+    st.warning(f"{partner_labels[partner_roster_id]} would be {warning}.")
 
 my_vorp_change = sum(vorp.get(pid, 0.0) for pid in receives) - sum(vorp.get(pid, 0.0) for pid in gives)
 their_vorp_change = -my_vorp_change
@@ -137,6 +142,7 @@ FACTOR_LABELS: dict[str, str] = {
     "regression": "TD luck adjustment",
     "matchup_adjustment": "Schedule strength",
     "game_script_adjustment": "Vegas game script",
+    "red_zone_adjustment": "Red zone role",
     "age_multiplier": "Age factor",
     "availability_multiplier": "Health status",
     "per_game": "Projected per game",
@@ -155,6 +161,10 @@ FACTOR_EXPLANATIONS: dict[str, str] = {
     "game_script_adjustment": (
         "A small, data-calibrated nudge from real Vegas point spreads and totals -- favorites tend "
         "to run more, and higher-scoring games mean more opportunity for everyone."
+    ),
+    "red_zone_adjustment": (
+        "Whether their share of their team's goal-line carries/targets -- the real touches that "
+        "turn into touchdowns -- is trending up or down."
     ),
     "age_multiplier": "A discount for players at an age when their position historically starts to decline.",
     "availability_multiplier": (
@@ -181,6 +191,20 @@ with st.expander("What goes into this number?"):
     st.caption("Rest-of-season total = Projected per game × Weighted games left.")
 
 
+# Sleeper encodes WR sub-slots as LWR/RWR/SWR (left/right/slot), never the
+# literal "WR" -- see data/models.py::Player.depth_chart_position.
+_WR_SLOT_NAMES = {"LWR": "left", "RWR": "right", "SWR": "slot"}
+
+
+def depth_chart_label(player) -> str | None:
+    if player.depth_chart_order is None or player.depth_chart_position is None:
+        return None
+    slot = _WR_SLOT_NAMES.get(player.depth_chart_position)
+    if slot is not None:
+        return f"WR{player.depth_chart_order} ({slot})"
+    return f"{player.depth_chart_position}{player.depth_chart_order}"
+
+
 def render_breakdown(column, player_id: str) -> None:
     breakdown = breakdowns.get(player_id)
     player = players.get(player_id)
@@ -200,7 +224,11 @@ def render_breakdown(column, player_id: str) -> None:
         ),
     )
     if player is not None:
-        column.write(f"{player.position} · {player.team} · {status}")
+        depth_label = depth_chart_label(player)
+        identity = f"{player.position} · {player.team} · {status}"
+        if depth_label:
+            identity += f" · {depth_label}"
+        column.write(identity)
 
     rows = [
         ("Recent scoring", f"{breakdown.baseline:.1f} pts/gm"),
@@ -208,6 +236,7 @@ def render_breakdown(column, player_id: str) -> None:
         ("TD luck adjustment", f"{breakdown.regression:+.1f} pts/gm"),
         ("Schedule strength", f"{breakdown.avg_matchup_adjustment:+.1f} pts/gm"),
         ("Vegas game script", f"{breakdown.avg_game_script_adjustment:+.1f} pts/gm"),
+        ("Red zone role", f"{breakdown.red_zone_adjustment:+.1f} pts/gm"),
         ("Age factor", f"{breakdown.age_multiplier:.0%}"),
         ("Health status", f"{breakdown.availability_multiplier:.0%} ({status})"),
         ("Projected per game", f"{breakdown.per_game:.1f} pts/gm"),
